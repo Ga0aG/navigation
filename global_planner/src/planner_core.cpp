@@ -121,10 +121,12 @@ void GlobalPlanner::initialize(std::string name, costmap_2d::Costmap2D* costmap,
             if(!old_navfn_behavior_)
                 de->setPreciseStart(true);
             planner_ = de;
+            ROS_INFO("Created global_planner using dijkstra algorithm");
         }
-        else
+        else{
             planner_ = new AStarExpansion(p_calc_, cx, cy);
-
+            ROS_INFO("Created global_planner using Astar algorithm");
+        }
         bool use_grid_path;
         private_nh.param("use_grid_path", use_grid_path, false);
         if (use_grid_path)
