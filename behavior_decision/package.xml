@@ -55,6 +55,6 @@
   
   <export>
     <!-- Other tools can request additional information be placed here -->
-    <pursuer_behavior_decision plugin="${prefix}/pursuer_decision/pbd_plugin.xml" />
+    <behavior_decision plugin="${prefix}/pursuer_behavior_decision/pbd_plugin.xml" />
   </export>
 </package>

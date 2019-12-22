@@ -58,6 +58,7 @@
 
 #include <dynamic_reconfigure/server.h>
 #include "move_base/MoveBaseConfig.h"
+#include <behavior_decision/behavior_decision_base.h>
 
 namespace move_base {
   //typedefs to help us out with the action server so that we don't hace to type so much
@@ -177,6 +178,8 @@ namespace move_base {
 
       MoveBaseActionServer* as_;
 
+      boost::shared_ptr<behavior_decision::BehaviorDecision> decision_;
+
       boost::shared_ptr<nav_core::BaseLocalPlanner> tc_;
       costmap_2d::Costmap2DROS* planner_costmap_ros_, *controller_costmap_ros_;
 
@@ -206,6 +209,7 @@ namespace move_base {
       pluginlib::ClassLoader<nav_core::BaseGlobalPlanner> bgp_loader_;
       pluginlib::ClassLoader<nav_core::BaseLocalPlanner> blp_loader_;
       pluginlib::ClassLoader<nav_core::RecoveryBehavior> recovery_loader_;
+      pluginlib::ClassLoader<behavior_decision::BehaviorDecision> bd_loader_;
 
       //set up plan triple buffer
       std::vector<geometry_msgs::PoseStamped>* planner_plan_;

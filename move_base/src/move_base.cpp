@@ -51,6 +51,7 @@ namespace move_base {
     planner_costmap_ros_(NULL), controller_costmap_ros_(NULL),
     bgp_loader_("nav_core", "nav_core::BaseGlobalPlanner"),
     blp_loader_("nav_core", "nav_core::BaseLocalPlanner"), 
+    bd_loader_("behavior_decision", "behavior_decision::BehaviorDecision"),
     recovery_loader_("nav_core", "nav_core::RecoveryBehavior"),
     planner_plan_(NULL), latest_plan_(NULL), controller_plan_(NULL),
     runPlanner_(false), setup_(false), p_freq_change_(false), c_freq_change_(false), new_global_plan_(false) {
@@ -63,7 +64,8 @@ namespace move_base {
     recovery_trigger_ = PLANNING_R;
 
     //get some parameters that will be global to the move base node
-    std::string global_planner, local_planner;
+    std::string global_planner, local_planner, behavior_planner;
+    private_nh.param("behavior_decision", behavior_planner, std::string("behavior_decision/PursuerBehaviorDecision"));
     private_nh.param("base_global_planner", global_planner, std::string("navfn/NavfnROS"));
     private_nh.param("base_local_planner", local_planner, std::string("base_local_planner/TrajectoryPlannerROS"));
     private_nh.param("global_costmap/robot_base_frame", robot_base_frame_, std::string("base_link"));
@@ -111,6 +113,21 @@ namespace move_base {
     //create the ros wrapper for the planner's costmap... and initializer a pointer we'll use with the underlying map
     planner_costmap_ros_ = new costmap_2d::Costmap2DROS("global_costmap", tf_);
     planner_costmap_ros_->pause();
+    
+    //create the ros wrapper for the controller's costmap... and initializer a pointer we'll use with the underlying map
+    controller_costmap_ros_ = new costmap_2d::Costmap2DROS("local_costmap", tf_);
+    controller_costmap_ros_->pause();
+
+    // create a behavior decision
+    try {
+      decision_ = bd_loader_.createInstance(behavior_planner);
+      ROS_INFO("Created behavior_decision %s", behavior_planner.c_str());
+      decision_->test();
+      decision_->initialize(bd_loader_.getName(behavior_planner), &tf_);
+    } catch (const pluginlib::PluginlibException& ex) {
+      ROS_FATAL("Failed to create the %s decision, are you sure it is properly registered and that the containing library is built? Exception: %s", "behavior_decision/PursuerBehaviorDecision", ex.what());
+      exit(1);
+    }
 
     //initialize the global planner
     try {
@@ -120,10 +137,6 @@ namespace move_base {
       ROS_FATAL("Failed to create the %s planner, are you sure it is properly registered and that the containing library is built? Exception: %s", global_planner.c_str(), ex.what());
       exit(1);
     }
-
-    //create the ros wrapper for the controller's costmap... and initializer a pointer we'll use with the underlying map
-    controller_costmap_ros_ = new costmap_2d::Costmap2DROS("local_costmap", tf_);
-    controller_costmap_ros_->pause();
 
     //create a local planner
     try {

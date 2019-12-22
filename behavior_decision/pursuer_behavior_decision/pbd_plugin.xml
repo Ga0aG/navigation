@@ -1,4 +1,4 @@
-<library path="lib/libbehavior_decision">
+<library path="lib/libpursuer_behavior_decision">
   <class name="behavior_decision/PursuerBehaviorDecision" type="behavior_decision::PursuerBehaviorDecision" base_class_type="behavior_decision::BehaviorDecision">
     <description>
       Pursuer's state transition

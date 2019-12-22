@@ -99,10 +99,16 @@ find_package(catkin REQUIRED COMPONENTS costmap_2d geometry_msgs pluginlib roscp
 ## CATKIN_DEPENDS: catkin_packages dependent projects also need
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
-#  INCLUDE_DIRS include
+ INCLUDE_DIRS include
 #  LIBRARIES behavior_decision
 #  CATKIN_DEPENDS other_catkin_pkg
 #  DEPENDS system_lib
+  CATKIN_DEPENDS
+    costmap_2d
+    geometry_msgs
+    pluginlib
+    roscpp
+    tf
 )
 
 ###########
@@ -113,7 +119,7 @@ catkin_package(
 ## Your package locations should be listed before other locations
 include_directories(
   include ${catkin_INCLUDE_DIRS}
-include
+  ${EIGEN3_INCLUDE_DIR}
 # ${catkin_INCLUDE_DIRS}
 )
 
@@ -202,15 +208,16 @@ include
 ## Add folders to be run by python nosetests
 # catkin_add_nosetests(test)
 
-
-add_library(pursuer_behavior_decision
-  src/pursuer_behavior_decision.cpp
-)
-add_dependencies(pursuer_behavior_decision ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
-target_link_libraries(pursuer_behavior_decision
-  ${catkin_LIBRARIES}
-)
+add_subdirectory(pursuer_behavior_decision)
+# add_library(pursuer_behavior_decision
+#   src/pursuer_behavior_decision.cpp
+# )
+# add_dependencies(pursuer_behavior_decision ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+# target_link_libraries(pursuer_behavior_decision
+#   ${catkin_LIBRARIES}
+# )
 install(DIRECTORY include/${PROJECT_NAME}/
    DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
    FILES_MATCHING PATTERN "*.h" 
+   PATTERN ".svn" EXCLUDE
 )

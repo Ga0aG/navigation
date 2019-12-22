@@ -21,6 +21,7 @@ find_package(catkin REQUIRED
         rotate_recovery
         std_srvs
         tf
+        behavior_decision
 )
 find_package(Eigen3 REQUIRED)
 add_definitions(${EIGEN3_DEFINITIONS})
