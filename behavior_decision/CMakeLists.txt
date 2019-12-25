@@ -2,12 +2,19 @@ cmake_minimum_required(VERSION 2.8.3)
 project(behavior_decision)
 
 ## Compile as C++11, supported in ROS Kinetic and newer
-# add_compile_options(-std=c++11)
+add_compile_options(-std=c++11)
 
 ## Find catkin macros and libraries
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
 ## is used, also find other catkin packages
-find_package(catkin REQUIRED COMPONENTS costmap_2d geometry_msgs pluginlib roscpp tf)
+find_package(catkin REQUIRED COMPONENTS 
+  costmap_2d 
+  geometry_msgs 
+  pluginlib 
+  roscpp 
+  tf 
+  apriltag_ros
+  )
 
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
@@ -66,6 +73,7 @@ find_package(catkin REQUIRED COMPONENTS costmap_2d geometry_msgs pluginlib roscp
 ## Generate added messages and services with any dependencies listed here
 # generate_messages(
 #   DEPENDENCIES
+#   apriltag_ros
 #   std_msgs  # Or other packages containing msgs
 # )
 
@@ -109,6 +117,7 @@ catkin_package(
     pluginlib
     roscpp
     tf
+    apriltag_ros
 )
 
 ###########

@@ -79,6 +79,8 @@ namespace move_base {
     private_nh.param("oscillation_timeout", oscillation_timeout_, 0.0);
     private_nh.param("oscillation_distance", oscillation_distance_, 0.5);
 
+    private_nh.param("automatic", automatic, true);
+    
     //set up plan triple buffer
     planner_plan_ = new std::vector<geometry_msgs::PoseStamped>();
     latest_plan_ = new std::vector<geometry_msgs::PoseStamped>();
@@ -123,7 +125,7 @@ namespace move_base {
       decision_ = bd_loader_.createInstance(behavior_planner);
       ROS_INFO("Created behavior_decision %s", behavior_planner.c_str());
       decision_->test();
-      decision_->initialize(bd_loader_.getName(behavior_planner), &tf_);
+      decision_->initialize(bd_loader_.getName(behavior_planner), &tf_, controller_costmap_ros_);
     } catch (const pluginlib::PluginlibException& ex) {
       ROS_FATAL("Failed to create the %s decision, are you sure it is properly registered and that the containing library is built? Exception: %s", "behavior_decision/PursuerBehaviorDecision", ex.what());
       exit(1);
@@ -175,6 +177,9 @@ namespace move_base {
 
     //we'll start executing recovery behaviors at the beginning of our list
     recovery_index_ = 0;
+
+    //set up the decision maker's thread
+    decision_thread_ = new boost::thread(boost::bind(&MoveBase::decisionThread, this));
 
     //we're all set up now so we can start the action server
     as_->start();
@@ -565,6 +570,30 @@ namespace move_base {
   {
     // we have slept long enough for rate
     planner_cond_.notify_one();
+  }
+
+  void MoveBase::decisionThread(){
+    ROS_DEBUG_NAMED("move_base_decision_thread","Starting decision thread...");
+    ros::NodeHandle n;
+    ros::Rate r(controller_frequency_);
+    while(n.ok())
+    {
+      if(c_freq_change_)
+      {
+        ROS_INFO("Setting controller frequency to %.2f", controller_frequency_);
+        r = ros::Rate(controller_frequency_);
+        c_freq_change_ = false;
+      }
+      if(automatic){
+        int robotState;
+        decision_->getState(robotState);
+        ROS_DEBUG_NAMED("move_base","current state:%d",robotState);
+        // ROS_DEBUG_NAMED("move_base","current state:%d",robotState);
+      }
+      // state_ = CONTROLLING;
+      r.sleep();
+      //executeCycle(geometry_msgs::PoseStamped& goal, std::vector<geometry_msgs::PoseStamped>& global_plan)
+    }
   }
 
   void MoveBase::planThread(){

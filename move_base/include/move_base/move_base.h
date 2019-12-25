@@ -67,7 +67,8 @@ namespace move_base {
   enum MoveBaseState {
     PLANNING,
     CONTROLLING,
-    CLEARING
+    CLEARING,
+    DECIDING
   };
 
   enum RecoveryTrigger
@@ -161,6 +162,8 @@ namespace move_base {
 
       void planThread();
 
+      void decisionThread();
+
       void executeCb(const move_base_msgs::MoveBaseGoalConstPtr& move_base_goal);
 
       bool isQuaternionValid(const geometry_msgs::Quaternion& q);
@@ -223,6 +226,9 @@ namespace move_base {
       geometry_msgs::PoseStamped planner_goal_;
       boost::thread* planner_thread_;
 
+      //set up the decision maker's thread
+      bool automatic;
+      boost::thread* decision_thread_;
 
       boost::recursive_mutex configuration_mutex_;
       dynamic_reconfigure::Server<move_base::MoveBaseConfig> *dsrv_;
