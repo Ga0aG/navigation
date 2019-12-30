@@ -583,11 +583,12 @@ namespace move_base {
         ROS_INFO("Setting controller frequency to %.2f", controller_frequency_);
         r = ros::Rate(controller_frequency_);
         c_freq_change_ = false;
+        decision_->resetFrequency(controller_frequency_);
       }
+      // For the case that don't need global goal
       if(automatic){
         int robotState;
         decision_->getState(robotState);
-        ROS_DEBUG_NAMED("move_base","current state:%d",robotState);
         // ROS_DEBUG_NAMED("move_base","current state:%d",robotState);
       }
       // state_ = CONTROLLING;
