@@ -1,5 +1,6 @@
 std_msgs/Header header
-uint64 id
+uint64 robot_id
+uint64 target_id
 bool lost
 float64 x
 float64 y

@@ -1,11 +1,12 @@
 #ifndef PURSUER_DECISION_MAKING_H
 #define PURSUER_DECISION_MAKING_H
 
-#include "behavior_decision/behavior_decision_base.h"
-#include <apriltag_ros/AprilTagDetectionArray.h>
+#include <mutex>
 #include <vector>
 #include <string>
 #include <algorithm>
+#include "behavior_decision/behavior_decision_base.h"
+#include <apriltag_ros/AprilTagDetectionArray.h>
 #include <pursuer_behavior_decision/KalmanFilter.h>
 #include "behavior_decision/evaderState.h"
 
@@ -32,18 +33,25 @@ namespace behavior_decision{
         // bool selectOptimalPolicy(Policy& policy);
     private:
         void detectionCallback(const apriltag_ros::AprilTagDetectionArray::ConstPtr& msg);
-        
-        std::string ns, ns_tf2;
+        void evaderStateCallback(const behavior_decision::evaderState::ConstPtr& msg, int id_);
+        void targetAssignment();
+        //TODO : Lost target recovery;
+
+        std::string ns, ns_tf2, gns;
         std::string fixed_frame_;
-        double controller_frequency_;
         int id, pnum, state_, target_id;
+        double controller_frequency_;
+        double lost_time_threshold_; // Check for targetState's availity
+        tf::TransformListener* tf_;
         
         ros::Subscriber detection_sub;
         ros::Publisher evaderState_pub;
-        tf::TransformListener* tf_;
+        std::vector<ros::Subscriber> evaderState_subs; // Subscribe evaderState from other pursuers;
+        std::recursive_mutex mutex_tags, mutex_evaderStates;
+        apriltag_ros::AprilTagDetectionArray tags;
+        std::map<int,behavior_decision::evaderState> detected;
         
-        KalmanFilter* kf;
-        std::map<int,Eigen::Matrix<double,4,1>> detected;
+        KalmanFilter* kf;//### why it has to be pointer, or --> undefined symbol
         };
 }
 #endif
