@@ -1,5 +1,5 @@
 add_library(pursuer_behavior_decision
-  pursuer_behavior_decision.cpp KalmanFilter.cpp
+  pursuer_behavior_decision.cpp KalmanFilter.cpp Hungarian.cpp
 )
 add_dependencies(pursuer_behavior_decision ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 target_link_libraries(pursuer_behavior_decision

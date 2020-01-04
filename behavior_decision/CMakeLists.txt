@@ -15,6 +15,7 @@ find_package(catkin REQUIRED COMPONENTS
   tf 
   apriltag_ros
   message_generation
+  nav_msgs
   )
 
 ## System dependencies are found with CMake's conventions
@@ -54,6 +55,7 @@ find_package(catkin REQUIRED COMPONENTS
 add_message_files(
   FILES
   evaderState.msg
+  dis2evaders.msg
 )
 
 ## Generate services in the 'srv' folder
