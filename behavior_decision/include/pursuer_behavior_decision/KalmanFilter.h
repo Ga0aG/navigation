@@ -18,7 +18,7 @@ class KalmanFilter{
         KalmanFilter(Matrix<double,4,1> initState,double deltat);
         ~KalmanFilter();
         // void initialize(Matrix<double,4,1> initState,double deltat);
-        void update(const geometry_msgs::Pose2D &position, Matrix<double,4,1> &estimatedState);
+        void update(const Matrix<double,2,1> &obs, Matrix<double,4,1> &estimatedState);
         void resetDeltat(double deltat);
 };
 

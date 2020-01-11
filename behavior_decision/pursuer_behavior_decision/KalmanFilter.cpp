@@ -1,11 +1,9 @@
 #include "pursuer_behavior_decision/KalmanFilter.h"
 
 
-void KalmanFilter::update(const geometry_msgs::Pose2D &position, Matrix<double,4,1> &estimatedState){
-    Matrix<double,2,1> obs;
+void KalmanFilter::update(const Matrix<double,2,1> &obs, Matrix<double,4,1> &estimatedState){
     Matrix<double,4,1> mu;
     MatrixXd Kt, delta,temp;
-    obs << position.x, position.y;
     mu = transition_matrix*mean;
     delta = transition_matrix*variance*transition_matrix.transpose()+transition_covariance;
     temp = observation_matrix*delta*observation_matrix.transpose()+observation_covariance;

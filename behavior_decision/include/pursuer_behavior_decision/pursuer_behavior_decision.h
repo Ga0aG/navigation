@@ -17,6 +17,7 @@
 #include <functional>     // std::greater
 #include <apriltag_ros/AprilTagDetectionArray.h>
 #include <nav_msgs/OccupancyGrid.h>
+#include <nav_msgs/Path.h>
 
 #include "pursuer_behavior_decision/Hungarian.h"
 #include <pursuer_behavior_decision/KalmanFilter.h>
@@ -60,6 +61,7 @@ namespace behavior_decision{
         std::string fixed_frame_;
         int id, pnum, state_, target_id;
         int maxiFollower;
+        int AdujustPathThre;
         double controller_frequency_;
         double lost_time_threshold_; // Check for targetState's availity
         double tracking2followingThre;
@@ -70,6 +72,7 @@ namespace behavior_decision{
         ros::Publisher evaderState_pub;
         ros::Publisher inflationMap_pub;
         ros::Publisher dis2evaders_pub;
+        ros::Publisher path_pub;
         std::vector<ros::Subscriber> evaderState_subs; // Subscribe evaderState from other pursuers;
         std::vector<ros::Subscriber> dis2evader_subs; 
         std::recursive_mutex mutex_tags, mutex_evaderStates, mutex_map;
@@ -80,10 +83,16 @@ namespace behavior_decision{
 
         // Astar
         nav_msgs::OccupancyGrid map_;
+        double origin_x;
+        double origin_y;
+        int width;
+        int height;
+        double resolution;
+
         double robot_radius;
         // Target assignment
         // if state_ != KEEPING, robot needs to calculate it's distance to each evader for targetAssignment 
-        std::map<int,std::deque<int>> path2evaders; // store index of roadpoint
+        std::map<int,std::deque<int>> path2evaders; // store index of waypoint
         std::map<int,double> dis2evaders;        // single pursuer, dis2evaders[evader_id]=distance
         // std::map<int,std::vector<double>> costs; // all pursuers, costs[robot_id]={dis,..,dis}(enum)
         std::map<int,std::map<int,double>> costs; // costs[robot_id]={evader_id: dis, ...} (Other pursuers')
@@ -92,6 +101,7 @@ namespace behavior_decision{
       
         // copied from global_planner 
         bool worldToMap(double wx, double wy, int& mx, int& my);
+        void mapToWorld(int& mx, int& my, double& wx, double& wy);
         };
 }
 #endif
