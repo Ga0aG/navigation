@@ -69,8 +69,7 @@ void PursuerBehaviorDecision::evaderStateCallback(const behavior_decision::evade
     // delete recorded keeper's cost
     if(msg->lost){
         // Remove lost target
-        if(detected.find(msg->target_id) != detected.end())
-            detected.erase(msg->target_id);
+        detected.erase(msg->target_id);
     }
     else{
         detected[msg->target_id] = *msg;
@@ -151,7 +150,6 @@ void PursuerBehaviorDecision::getState(int &state){
     robot_pose.x = robot_transform.getOrigin().x();
     robot_pose.y = robot_transform.getOrigin().y();
 
-    
     int tag_id;
     bool lostTarget = true;
     Eigen::Matrix<double,4,1> estimatedState; // estimate position and velocity(2d) of target evader
@@ -202,11 +200,11 @@ void PursuerBehaviorDecision::getState(int &state){
                 v = hypot(vx, vy);
                 // initial velocity is set to 1 m/s towards robot
                 estimatedState << evader_pose.x, evader_pose.y, vx/v, vy/v;
-                ROS_DEBUG("robot id : %d, evader %d 's initial state:%f, %f, %f, %f", id, target_id, evader_pose.x, evader_pose.y, vx/v,  vy/v);
+                ROS_DEBUG("robot%d, evader %d 's initial state:%f, %f, %f, %f", id, target_id, evader_pose.x, evader_pose.y, vx/v,  vy/v);
 
                 kf = new KalmanFilter(estimatedState, 1.0/controller_frequency_);
                 state_ = KEEPING;
-                ROS_DEBUG("robot %d state transform from SEARCHING to KEEPING", id);
+                ROS_DEBUG_NAMED("state_transition","robot%d: state transform from SEARCHING to KEEPING", id);
                 lostTarget = false;
                 dis2evaders.clear();
                 path2evaders.clear();
@@ -225,18 +223,21 @@ void PursuerBehaviorDecision::getState(int &state){
         evaderState_.header.stamp = ros::Time::now();
         evaderState_.header.frame_id = fixed_frame_;
         evaderState_.robot_id = id;
-        evaderState_.target_id = tag_id;
+        evaderState_.target_id = target_id;
         evaderState_.lost = lostTarget;
         evaderState_.x = estimatedState(0,0);
         evaderState_.y = estimatedState(1,0);
         evaderState_.vx = estimatedState(2,0);
         evaderState_.vy = estimatedState(3,0);
         evaderState_pub.publish(evaderState_);
-        detected[target_id] = evaderState_;
         if(lostTarget){
             state_ = SEARCHING;
+            detected.erase(target_id);
             target_id = -1;
-            ROS_DEBUG("(TEMPT)Lost target.robot %d state transform from KEEPING to SEARCHING ",id);
+            ROS_DEBUG_NAMED("state_transition","robot%d: state transform from KEEPING to SEARCHING (TEMPT)Lost target.",id);
+        }
+        else{
+            detected[target_id] = evaderState_;
         }
     }
 
@@ -246,19 +247,19 @@ void PursuerBehaviorDecision::getState(int &state){
             behavior_decision::evaderState evaderState_ = it -> second;
             ros::Duration diff_time = ros::Time::now() - evaderState_.header.stamp;
             if(diff_time.toSec() > lost_time_threshold_){
-                ROS_DEBUG("Lost target : %lu", evaderState_.target_id);
                 detected.erase(it -> first);
+                ROS_DEBUG_NAMED("state_transition","robot%d :Lost target : %d, size of detected:%zd, target_id:%d", id, it -> first, detected.size(),target_id);
             }
         }
     }
-    
+    // For TRACKING or FOLLOWING robot
     if(target_id >= 0 && detected.find(target_id)==detected.end()){
         dis2evaders.erase(target_id);
         path2evaders.erase(target_id);// it's fine if target_id is not existed
         target_id = -1;
-        ROS_DEBUG("(TEMPT).robot %d state transform to SEARCHING ",id);
+        ROS_DEBUG_NAMED("state_transition","robot%d :Lost target :state transform to SEARCHING (TEMPT).",id);
     }
-
+    // ROS_DEBUG("robot%d 1",id);
     // if not Keeper, publish distance to each detected evader 
     int start_x, start_y;
     std::map<int, std::pair<int,int>> target_poses;
@@ -314,12 +315,12 @@ void PursuerBehaviorDecision::getState(int &state){
         }
     }
     states_lock.unlock();
-
+    // ROS_DEBUG("robot%d 2",id);
 
     int target_x = target_poses[target_id].first, target_y = target_poses[target_id].second;
     if(state_ == TRACKING && grid_dis(start_x, start_y, target_x, target_y)/resolution < tracking2followingThre){
         state_ = FOLLOWING;
-        ROS_DEBUG("robot %d state transform from TRACKING to FOLLOWING ",id);
+        ROS_DEBUG_NAMED("state_transition","robot%d: state transform from TRACKING to FOLLOWING ",id);
     }
     state =  state_;
     lock_map.unlock();
@@ -352,7 +353,7 @@ void PursuerBehaviorDecision::targetAssignment(){
             }
             else{
                 cost.push_back(MAX_COST);
-                ROS_DEBUG("robot i %d dont have dis to evader %d", it->first, *it_id);
+                ROS_DEBUG("robot%d: dont have dis to evader %d", it->first, *it_id);
             }
         }
         costs_matrix.push_back(cost);
@@ -377,7 +378,7 @@ void PursuerBehaviorDecision::targetAssignment(){
         if(evaderIdOrder[target_ind] != target_id){
             state_ = TRACKING;
             target_id = evaderIdOrder[target_ind];
-            ROS_DEBUG("robot %d state transform to TRACKING ",id);
+            ROS_DEBUG_NAMED("state_transition","robot%d: state transform to TRACKING , id of target: %d, size of detected: %zd",id,detected.begin()->first,detected.size());
         }     
     }
     else{
@@ -393,7 +394,6 @@ void PursuerBehaviorDecision::calculateDistance(int start_x, int start_y, int ta
     if (path2evaders.find(target_id) == path2evaders.end()){
         std::vector<int> path;
         if(Astar(start_x, start_y, target_x, target_y, path)){// path is from [target -> start]
-            ROS_DEBUG("path size:  %zd, target ind: %d , end of path ind:%d",path.size(),MAP_IDX(width,target_x,target_y),path.front());
             dis2evaders[target_id] = 0;
             int pre_x = start_x, pre_y  = start_y;
             for (std::vector<int>::reverse_iterator rit = path.rbegin(); rit!= path.rend(); ++rit){
@@ -430,7 +430,7 @@ void PursuerBehaviorDecision::calculateDistance(int start_x, int start_y, int ta
                     ++hit;
                     ++count;
             }
-            if(count) ROS_DEBUG("head-pop:%d",count); count = 0;
+            // if(count) ROS_DEBUG("head-pop:%d",count); count = 0;
             std::vector<int> hpath;
             int head = path2evaders[target_id].front();
             if(Astar(start_x, start_y, head % width, head / width, hpath)){
@@ -462,7 +462,7 @@ void PursuerBehaviorDecision::calculateDistance(int start_x, int start_y, int ta
                     --eit;
                     count++;
             }
-            if(count) ROS_DEBUG("tail-pop:%d",count); 
+            // if(count) ROS_DEBUG("tail-pop:%d",count); 
             std::vector<int> epath;
             int tail = path2evaders[target_id].back();
             if(Astar(target_x, target_y, tail % width, tail / width, epath)){
