@@ -142,6 +142,7 @@ namespace move_base {
 
     //create a local planner
     try {
+      ROS_INFO("Try to create local_planner %s", local_planner.c_str());
       tc_ = blp_loader_.createInstance(local_planner);
       ROS_INFO("Created local_planner %s", local_planner.c_str());
       tc_->initialize(blp_loader_.getName(local_planner), &tf_, controller_costmap_ros_);
@@ -585,13 +586,15 @@ namespace move_base {
         c_freq_change_ = false;
         decision_->resetFrequency(controller_frequency_);
       }
-      // For the case that don't need global goal
+      // For the case that don't need MoveBaseActionServer
       if(automatic){
         int robotState;
+        geometry_msgs::Twist cmd_vel;
         decision_->getState(robotState);
-        // ROS_DEBUG_NAMED("move_base","current state:%d",robotState);
+        tc_->setState(robotState);
+        tc_->computeVelocityCommands(cmd_vel);
+        vel_pub_.publish(cmd_vel);
       }
-      // state_ = CONTROLLING;
       r.sleep();
       //executeCycle(geometry_msgs::PoseStamped& goal, std::vector<geometry_msgs::PoseStamped>& global_plan)
     }

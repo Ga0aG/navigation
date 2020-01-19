@@ -38,7 +38,7 @@ void PursuerBehaviorDecision::initialize(std::string name, tf::TransformListener
     private_nh.param("tracking2followingThre"    , tracking2followingThre, 2.0);
     private_nh.param("AdujustPathThre"           , AdujustPathThre, 1); //grid dis
     
-    ROS_DEBUG("initialize robot%d, current state is %d, the number of pursuers is:%d",id,state_,pnum);  
+    ROS_DEBUG("initialize robot%d' behavior decision planner, current state is %d, the number of pursuers is:%d",id,state_,pnum);  
     map_sub = private_nh.subscribe(ns+"/map", 1, &PursuerBehaviorDecision::mapCallback,this);
     detection_sub = private_nh.subscribe(ns+"/tag_detections", 1, &PursuerBehaviorDecision::detectionCallback,this);
     evaderState_pub = private_nh.advertise<behavior_decision::evaderState>(ns+"/evader_state", 1, true);

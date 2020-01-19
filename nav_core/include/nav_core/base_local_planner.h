@@ -76,6 +76,8 @@ namespace nav_core {
        * @param costmap_ros The cost map to use for assigning costs to local plans
        */
       virtual void initialize(std::string name, tf::TransformListener* tf, costmap_2d::Costmap2DROS* costmap_ros) = 0;
+      
+      virtual bool setState(int &state){return true;}
 
       /**
        * @brief  Virtual destructor for the interface
