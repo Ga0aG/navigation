@@ -13,8 +13,9 @@
 #include <algorithm>
 #include <cmath>
 #include <deque>
-#include <queue>          // std::priority_queue
-#include <functional>     // std::greater
+// #include <queue>          // std::priority_queue
+// #include <functional>     // std::greater
+// #include <std_msgs/Int8.h>
 #include <apriltag_ros/AprilTagDetectionArray.h>
 #include <nav_msgs/OccupancyGrid.h>
 #include <nav_msgs/Path.h>
@@ -73,6 +74,7 @@ namespace behavior_decision{
         ros::Publisher inflationMap_pub;
         ros::Publisher dis2evaders_pub;
         ros::Publisher path_pub;
+        // ros::Publisher target_pub;
         std::vector<ros::Subscriber> evaderState_subs; // Subscribe evaderState from other pursuers;
         std::vector<ros::Subscriber> dis2evader_subs; 
         std::recursive_mutex mutex_tags, mutex_evaderStates, mutex_map;

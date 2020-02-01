@@ -44,11 +44,12 @@ void PursuerBehaviorDecision::initialize(std::string name, tf::TransformListener
     evaderState_pub = private_nh.advertise<behavior_decision::evaderState>(ns+"/evader_state", 1, true);
     dis2evaders_pub = private_nh.advertise<behavior_decision::dis2evaders>(ns+"/dis2evaders", 1, true);
     path_pub = private_nh.advertise<nav_msgs::Path>(ns+"/trackingPath",1);
+    // target_pub = private_nh.advertise<std_msgs::Int8>(ns+"/target_id",1);
     // robot's id start with 1
     for(int i = 1; i <= pnum; i++){
         if(i != id){
-            ros::Subscriber evaderState_sub = private_nh.subscribe("/"+gns+to_string(i)+"/evader_state", 10, &PursuerBehaviorDecision::evaderStateCallback, this);
-            ros::Subscriber dis2evader_sub = private_nh.subscribe("/"+gns+to_string(i)+"/dis2evaders", 1, &PursuerBehaviorDecision::dis2evadersCallback, this);
+            ros::Subscriber evaderState_sub = private_nh.subscribe(gns+to_string(i)+"/evader_state", 10, &PursuerBehaviorDecision::evaderStateCallback, this);
+            ros::Subscriber dis2evader_sub = private_nh.subscribe(gns+to_string(i)+"/dis2evaders", 1, &PursuerBehaviorDecision::dis2evadersCallback, this);
             ROS_DEBUG("check: %s",(gns+to_string(i)).c_str());
             evaderState_subs.push_back(evaderState_sub);
             dis2evader_subs.push_back(dis2evader_sub);
@@ -169,7 +170,7 @@ void PursuerBehaviorDecision::getState(int &state){
                 
                 obs << evader_transform.getOrigin().x(), evader_transform.getOrigin().y();
                 kf->update(obs, estimatedState); 
-                // ROS_DEBUG("evader %d 's pos: %f, %f; current state:%f, %f, %f, %f",target_id, obs(0,0), obs(1,0), estimatedState(0,0),estimatedState(1,0),estimatedState(2,0),estimatedState(3,0));
+                ROS_DEBUG("evader %d 's pos: %f, %f; current state:%f, %f, %f, %f",target_id, obs(0,0), obs(1,0), estimatedState(0,0),estimatedState(1,0),estimatedState(2,0),estimatedState(3,0));
             }
             catch(tf::TransformException& ex){
                 ROS_ERROR("tf transform error: %s",ex.what());
@@ -324,6 +325,9 @@ void PursuerBehaviorDecision::getState(int &state){
     }
     state =  state_;
     lock_map.unlock();
+    ros::NodeHandle nh;
+    nh.setParam(ns+"target_id", target_id);
+    // target_pub.publish((int8_t)target_id);
 }
 
 // using data costs, dis2evaders

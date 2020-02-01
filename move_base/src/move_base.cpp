@@ -80,6 +80,7 @@ namespace move_base {
     private_nh.param("oscillation_distance", oscillation_distance_, 0.5);
 
     private_nh.param("automatic", automatic, true);
+    private_nh.param("ccbso_localPlanner_enable", ccbso_localPlanner_enable, true);
     
     //set up plan triple buffer
     planner_plan_ = new std::vector<geometry_msgs::PoseStamped>();
@@ -125,7 +126,7 @@ namespace move_base {
       decision_ = bd_loader_.createInstance(behavior_planner);
       ROS_INFO("Created behavior_decision %s", behavior_planner.c_str());
       decision_->test();
-      decision_->initialize(bd_loader_.getName(behavior_planner), &tf_, controller_costmap_ros_);
+      decision_->initialize(bd_loader_.getName(behavior_planner), &tf_, planner_costmap_ros_);
     } catch (const pluginlib::PluginlibException& ex) {
       ROS_FATAL("Failed to create the %s decision, are you sure it is properly registered and that the containing library is built? Exception: %s", "behavior_decision/PursuerBehaviorDecision", ex.what());
       exit(1);
@@ -220,7 +221,7 @@ namespace move_base {
       controller_frequency_ = config.controller_frequency;
       c_freq_change_ = true;
     }
-
+    ccbso_localPlanner_enable = config.ccbso_localPlanner_enable;
     planner_patience_ = config.planner_patience;
     controller_patience_ = config.controller_patience;
     max_planning_retries_ = config.max_planning_retries;
@@ -585,6 +586,7 @@ namespace move_base {
         r = ros::Rate(controller_frequency_);
         c_freq_change_ = false;
         decision_->resetFrequency(controller_frequency_);
+        tc_->resetFrequency(controller_frequency_);
       }
       // For the case that don't need MoveBaseActionServer
       if(automatic){
@@ -593,7 +595,8 @@ namespace move_base {
         decision_->getState(robotState);
         tc_->setState(robotState);
         tc_->computeVelocityCommands(cmd_vel);
-        vel_pub_.publish(cmd_vel);
+        if(ccbso_localPlanner_enable)
+          vel_pub_.publish(cmd_vel);
       }
       r.sleep();
       //executeCycle(geometry_msgs::PoseStamped& goal, std::vector<geometry_msgs::PoseStamped>& global_plan)

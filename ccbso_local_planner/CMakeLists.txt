@@ -15,6 +15,9 @@ find_package(catkin REQUIRED
             pcl_conversions
             roscpp
             tf
+            sensor_msgs
+            std_msgs
+            visualization_msgs
         )
 
 find_package(Eigen3 REQUIRED)
