@@ -22,6 +22,7 @@
 #include <tf/transform_listener.h>
 #include <costmap_2d/costmap_2d_ros.h>
 #include <nav_core/base_local_planner.h>
+#include <ccbso_local_planner/check_fitness.h>
 
 #include "ccbso_config.h"
 #include <dynamic_reconfigure/server.h>
@@ -54,23 +55,12 @@ namespace ccbso_local_planner{
     int id, pnum;
     double robot_radius;
     double controller_frequency_;
+    bool received_scan;
 
     std::string ns, ns_tf2, gns, tf_prefix, fixed_frame_;
 
-    bool received_scan;
-
-    // dynamic parameter
-    int psize,iteration; // psize,size of population 
-    double max_vel_x, max_rot_vel;
-    double acc_lim_x, acc_lim_theta;
-    double Pelitist, Pone;
-    double Rstep, Astep;// step of disturbance when generate new individual
-    double pheromone_lasting;//s
-    double searchDis, searchAngle;
-    double markedDis, markedAngle;// Aread marked as visited, msgDistance should be less than searchDistance
-    double threDis, threAngle; // parameter of trail recording
-
     tf::TransformListener* tf_;
+    costmap_2d::Costmap2DROS* costmap_ros_;
 
     boost::shared_ptr<dynamic_reconfigure::Server<CCBSOPlannerConfig>> dsrv_;
     std::string states[4] = {"SEARCHING", "KEEPING", "TRACKING", "FOLLOWING"};
@@ -79,9 +69,10 @@ namespace ccbso_local_planner{
     ros::Publisher pub_pheromoneTrail; 
     ros::Publisher pub_lookAheadPoint;
     std::vector<ros::Subscriber> sub_trails;
-    sensor_msgs::LaserScan scan;
+    ros::ServiceServer srv_check_fitness;
 
     std::recursive_mutex mutex_scan, mutex_trails;
+    sensor_msgs::LaserScan scan;
     std::map<int,int> targets;
     std::map<int,geometry_msgs::Pose2D> pursuer_poses;
     std::map<int,nav_msgs::Path> trails;
@@ -90,12 +81,16 @@ namespace ccbso_local_planner{
     void laserCallback(const sensor_msgs::LaserScanConstPtr &msg);
     void trailCallback(const nav_msgs::PathConstPtr &msg, int i);
     void publishLookAheadPoint(std::pair<float,float>& pos);
+    bool checkFitnessService(check_fitness::Request &req,
+                             check_fitness::Response &res);
 
     void bsoSelection(std::pair<float,float>& nextPos);
     double calFitness(std::pair<float,float>& pos);
     float Fobstacle(std::pair<float,float>& pos); 
+    bool isNearToObstacle(std::pair<float,float>& pos);
     float Fpheromone(std::pair<float,float>& pos);
     float Fcruise(std::pair<float,float>& pos);
+    float FangularAcc(std::pair<float,float>& pos);
 
     inline void getNthElement(std::multiset<std::pair<double,int>>::iterator it, int n, std::pair<double,int>& individual){
       std::advance(it,n);

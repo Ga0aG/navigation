@@ -20,6 +20,8 @@ public:
     double markedDis, markedAngle;
     double threDis, threAngle;
 
+    double weight_aa;
+
     static CCBSOConfig& getInstance();
     #define CCBSOCONFIG CCBSOConfig::getInstance()
 
@@ -46,12 +48,13 @@ private:
         Rstep = 0.1;
         Astep = 0.1;
         pheromone_lasting = 30.0;
-        searchDis = 0.5;
+        searchDis = 1.0;
         searchAngle = 1.0472;// pi/3
-        markedDis = 0.3;
+        markedDis = 0.5;
         markedAngle = 0.785;
         threDis = 0.2;
         threAngle = 0.17; // 3.14/18
+        weight_aa = 0.1;
     }
     static CCBSOConfig *instance;
 };
@@ -78,6 +81,7 @@ void CCBSOConfig::loadRosParamFromNodeHandle(const ros::NodeHandle& nh)
     nh.param("markedAngle", markedAngle, markedAngle);
     nh.param("threDis", threDis, threDis);
     nh.param("threAngle", threAngle, threAngle);
+    nh.param("weight_aa", weight_aa, weight_aa);
     
     checkParameters();
     checkDeprecated(nh);
@@ -108,6 +112,7 @@ void CCBSOConfig::reconfigure(ccbso_local_planner::CCBSOPlannerConfig& cfg)
     markedAngle = cfg.markedAngle;
     threDis = cfg.threDis;
     threAngle = cfg.threAngle;
+    weight_aa = cfg.weight_aa;
 
     checkParameters();
 }

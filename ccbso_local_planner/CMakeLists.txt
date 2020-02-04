@@ -18,6 +18,7 @@ find_package(catkin REQUIRED
             sensor_msgs
             std_msgs
             visualization_msgs
+            message_generation
         )
 
 find_package(Eigen3 REQUIRED)
@@ -30,6 +31,15 @@ include_directories(
     ${PCL_INCLUDE_DIRS}
     )
 add_definitions(${EIGEN3_DEFINITIONS})
+
+add_service_files(FILES
+  check_fitness.srv
+)
+
+## Generate added messages and services with any dependencies listed here
+generate_messages(DEPENDENCIES
+  std_msgs
+)
 
 # dynamic reconfigure
 generate_dynamic_reconfigure_options(
@@ -44,6 +54,7 @@ catkin_package(
         nav_msgs
         pluginlib
         roscpp
+        message_runtime
 )
 
 add_library(ccbso_local_planner src/ccbso_local_planner.cpp)

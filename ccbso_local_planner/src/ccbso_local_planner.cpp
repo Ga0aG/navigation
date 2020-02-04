@@ -7,15 +7,15 @@ PLUGINLIB_EXPORT_CLASS(ccbso_local_planner::CCBSOPlanner, nav_core::BaseLocalPla
 
 using namespace ccbso_local_planner;
 
-CCBSOPlanner::CCBSOPlanner():received_scan(false){
+CCBSOPlanner::CCBSOPlanner():received_scan(false), state_(SEARCHING){
 
 }
 CCBSOPlanner::~CCBSOPlanner(){
 
 }
 void CCBSOPlanner::initialize(std::string name, tf::TransformListener* tf, costmap_2d::Costmap2DROS* costmap_ros){
-    state_ = SEARCHING;
     tf_ = tf;
+    costmap_ros_ = costmap_ros;
 
     // get namespace
     ns = ros::this_node::getNamespace();
@@ -44,6 +44,7 @@ void CCBSOPlanner::initialize(std::string name, tf::TransformListener* tf, costm
     }
     pub_pheromoneTrail = nh.advertise<nav_msgs::Path>(ns+"/pheromoneTrail",1);
     pub_lookAheadPoint = nh.advertise<visualization_msgs::Marker>(ns+"/lookAheadPoint",1);
+    srv_check_fitness = nh.advertiseService("check_fitness", &CCBSOPlanner::checkFitnessService, this);
 
     ros::NodeHandle private_nh("/" + name);
     CCBSOCONFIG.loadRosParamFromNodeHandle(private_nh);
@@ -71,7 +72,26 @@ void CCBSOPlanner::trailCallback(const nav_msgs::PathConstPtr &msg, int i){
     trails[i] = *msg;
 }
 
+bool CCBSOPlanner::checkFitnessService(check_fitness::Request &req,
+                                       check_fitness::Response &res){
+    // state_ = res.state
+    std::pair<float,float> pos(req.delta_trans, req.delta_rot1);
+    switch(state_){
+        case SEARCHING:{
+            res.Fpheromone = Fpheromone(pos);
+            res.Fobstacle =  Fobstacle(pos);
+            res.Fcruise = Fcruise(pos);
+            res.FangularAcc = FangularAcc(pos);
+            break;
+        }
+        default:{
+            break;
+        }
+    }
+}
+
 bool CCBSOPlanner::setState(int &state){
+    // TODO, bool alow_received
     if(state_ != state){
         ROS_DEBUG("robot%d: state transform from %s to %s", id, states[state_].c_str(), states[state].c_str());
         state_ = state;
@@ -156,7 +176,7 @@ bool CCBSOPlanner::computeVelocityCommands(geometry_msgs::Twist& cmd_vel){
     cmd_vel.angular.z = nextPos.second;
     
     publishLookAheadPoint(nextPos);
-    ROS_INFO("Next pose:%f,%f; cmd_vel:%lf; ",nextPos.first,nextPos.second,cmd_vel.linear.x);
+    // ROS_INFO("Next pose:%f,%f; cmd_vel:%lf; ",nextPos.first,nextPos.second,cmd_vel.linear.x);
 }
 
 void CCBSOPlanner::bsoSelection(std::pair<float,float>& nextPos){
@@ -263,7 +283,16 @@ void CCBSOPlanner::bsoSelection(std::pair<float,float>& nextPos){
         std::pair<double,int> worseIndi;
         getNthElement(individuals.begin(),CCBSOCONFIG.psize-1,worseIndi);
         ROS_INFO("distance:%f, angle:%f, value:%lf, worse value:%lf",nextPos.first,nextPos.second,(*individuals.begin()).first,worseIndi.first);
-        ROS_DEBUG_NAMED("ccbso","%d, distance:%f, angle:%f",ind,nextPos.first,nextPos.second);
+        // ROS_DEBUG_NAMED("ccbso","%d, distance:%f, angle:%f",ind,nextPos.first,nextPos.second);
+        switch(state_){
+            case SEARCHING:{
+                ROS_INFO("Fpheromone:%f, Fobstacle:%f, Fcruise:%f, FangularAcc:%f",Fpheromone(nextPos),Fobstacle(nextPos),Fcruise(nextPos), FangularAcc(nextPos));
+                break;
+            }
+            default:{
+                break;
+            }
+        }
     }
     else{
         ROS_ERROR("individuals is empty");
@@ -275,7 +304,7 @@ double CCBSOPlanner::calFitness(std::pair<float,float>& pos){
     double fitness = 0;
     switch(state_){
         case SEARCHING:{
-            fitness += Fpheromone(pos) + Fobstacle(pos);
+            fitness += Fpheromone(pos) + Fobstacle(pos) + Fcruise(pos) + FangularAcc(pos);
             break;
         }
         default:{
@@ -302,11 +331,43 @@ float CCBSOPlanner::Fobstacle(std::pair<float,float>& pos){
         }
     }
     int index = round(posTheta/scan.angle_increment);
-    if(scan.ranges[index] < pos.first || scan.ranges[index] < robot_radius)
+    if(scan.ranges[index] < pos.first || scan.ranges[index] < robot_radius || isNearToObstacle(pos))
         return fmaxi;
-    else
-        return 0.0;
-   
+    else{
+        //(1) Can not turn around  when the wall is ahead
+        // return scan.ranges[index] < CCBSOCONFIG.searchDis? exp(-(CCBSOCONFIG.searchDis - scan.ranges[index])/CCBSOCONFIG.searchDis): 0.0;
+        //(2) Too close with the wall, it can turn direction when the wall is ahead,
+        // but cannot judge the newPos is close to the wall or not. 
+        return scan.ranges[index] < CCBSOCONFIG.searchDis? exp(-(scan.ranges[index]-pos.first)/CCBSOCONFIG.searchDis): 0.0;
+
+    }
+
+    
+}
+
+bool CCBSOPlanner::isNearToObstacle(std::pair<float,float>& pos){
+    costmap_2d::Costmap2D * costmap_ = costmap_ros_->getCostmap();
+    double resolution = costmap_->getResolution();
+    double originX = costmap_->getOriginX();
+    double originY = costmap_->getOriginY();
+    double sizeX = costmap_->getSizeInCellsX();
+    double sizeY = costmap_->getSizeInCellsY();
+
+    float nextPose_x = pursuer_poses[id].x + pos.first*cos(pursuer_poses[id].theta+pos.second);
+    float nextPose_y = pursuer_poses[id].y + pos.first*sin(pursuer_poses[id].theta+pos.second);
+    int nextPose_xl = (int)((nextPose_x-robot_radius-originX)/resolution);
+    int nextPose_xh = (int)((nextPose_x+robot_radius-originX)/resolution);
+    int nextPose_yl = (int)((nextPose_y-robot_radius-originY)/resolution);
+    int nextPose_yh = (int)((nextPose_y+robot_radius-originY)/resolution);
+    if(nextPose_xl<0 || nextPose_xh>=sizeX || nextPose_yl<0 || nextPose_yh>=sizeY)
+        return true;
+    for(unsigned int mx=nextPose_xl;mx<=nextPose_xh;mx++){
+        for(unsigned int my=nextPose_yl;my<=nextPose_yh;my++){
+            if(costmap_->getCost(mx,my)>costmap_2d::FREE_SPACE)
+                return true;
+        }
+    }
+    return false;
 }
 
 float CCBSOPlanner::Fpheromone(std::pair<float,float>& pos){
@@ -336,6 +397,13 @@ float CCBSOPlanner::Fcruise(std::pair<float,float>& pos){
     float nextPose_x = pursuer_poses[id].x + pos.first*cos(pursuer_poses[id].theta+pos.second);
     float nextPose_y = pursuer_poses[id].y + pos.first*sin(pursuer_poses[id].theta+pos.second);
     return (5 - std::max(std::abs(nextPose_y), std::abs(nextPose_x)));
+}
+
+float CCBSOPlanner::FangularAcc(std::pair<float,float>& pos){
+    //preference : straight > turn right > turn left
+    float value = pos.second > 0? 1: 0;
+    value = CCBSOCONFIG.weight_aa*std::abs(pos.second)*(1+value);
+    return value;
 }
 
 void CCBSOPlanner::resetFrequency(double frequency){
