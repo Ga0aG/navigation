@@ -16,6 +16,7 @@
 #include <geometry_msgs/Twist.h>
 #include <geometry_msgs/Pose2D.h>
 #include <geometry_msgs/PoseStamped.h>
+#include <geometry_msgs/PoseArray.h>
 #include <sensor_msgs/LaserScan.h>
 #include <visualization_msgs/Marker.h>
 
@@ -28,7 +29,7 @@
 #include <dynamic_reconfigure/server.h>
 
 const float fmaxi = 100.0;
-const float pheromone = 10;
+//const float pheromone = 10;
 const float PI = 3.14159265;
 
 namespace ccbso_local_planner{
@@ -67,20 +68,23 @@ namespace ccbso_local_planner{
 
     ros::Subscriber sub_laser;
     ros::Publisher pub_pheromoneTrail; 
+    ros::Publisher pub_pheromoneTrail_;
     ros::Publisher pub_lookAheadPoint;
+    ros::Publisher pub_checkPoint;
     std::vector<ros::Subscriber> sub_trails;
     ros::ServiceServer srv_check_fitness;
 
-    std::recursive_mutex mutex_scan, mutex_trails;
+    std::recursive_mutex mutex_scan, mutex_trails,mutex_pursuers;
     sensor_msgs::LaserScan scan;
     std::map<int,int> targets;
     std::map<int,geometry_msgs::Pose2D> pursuer_poses;
     std::map<int,nav_msgs::Path> trails;
+    // std::map<int,geometry_msgs::PoseArray> trails;
 
     void reconfigureCB(CCBSOPlannerConfig &config, uint32_t level);
     void laserCallback(const sensor_msgs::LaserScanConstPtr &msg);
     void trailCallback(const nav_msgs::PathConstPtr &msg, int i);
-    void publishLookAheadPoint(std::pair<float,float>& pos);
+    void publishLookAheadPoint(std::pair<float,float>& pos, bool switch_ = false);
     bool checkFitnessService(check_fitness::Request &req,
                              check_fitness::Response &res);
 

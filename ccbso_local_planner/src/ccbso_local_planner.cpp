@@ -43,7 +43,9 @@ void CCBSOPlanner::initialize(std::string name, tf::TransformListener* tf, costm
         }
     }
     pub_pheromoneTrail = nh.advertise<nav_msgs::Path>(ns+"/pheromoneTrail",1);
+    pub_pheromoneTrail_ = nh.advertise<geometry_msgs::PoseArray>(ns+"/pheromoneTrail_",1);
     pub_lookAheadPoint = nh.advertise<visualization_msgs::Marker>(ns+"/lookAheadPoint",1);
+    pub_checkPoint = nh.advertise<visualization_msgs::Marker>(ns+"/checkPoint",1);
     srv_check_fitness = nh.advertiseService("check_fitness", &CCBSOPlanner::checkFitnessService, this);
 
     ros::NodeHandle private_nh("/" + name);
@@ -68,7 +70,7 @@ void CCBSOPlanner::laserCallback(const sensor_msgs::LaserScanConstPtr &msg){
 }
 
 void CCBSOPlanner::trailCallback(const nav_msgs::PathConstPtr &msg, int i){
-    std::unique_lock<std::recursive_mutex> lock_tags(mutex_trails);
+    std::unique_lock<std::recursive_mutex> lock_trails(mutex_trails);
     trails[i] = *msg;
 }
 
@@ -88,6 +90,9 @@ bool CCBSOPlanner::checkFitnessService(check_fitness::Request &req,
             break;
         }
     }
+    res.sum = res.Fpheromone+res.Fobstacle+res.Fcruise+res.FangularAcc;
+    std::unique_lock<std::recursive_mutex> lock_pursuers(mutex_pursuers);
+    publishLookAheadPoint(pos,true);
 }
 
 bool CCBSOPlanner::setState(int &state){
@@ -100,6 +105,8 @@ bool CCBSOPlanner::setState(int &state){
 
 bool CCBSOPlanner::computeVelocityCommands(geometry_msgs::Twist& cmd_vel){
     // get pursuers' poses
+    std::unique_lock<std::recursive_mutex> lock_pursuers(mutex_pursuers);
+    std::unique_lock<std::recursive_mutex> lock_trails(mutex_trails);
     geometry_msgs::PoseStamped currPose;
     for(int i=1;i<=pnum;i++){
         tf::StampedTransform pursuser_transform;
@@ -136,20 +143,29 @@ bool CCBSOPlanner::computeVelocityCommands(geometry_msgs::Twist& cmd_vel){
     }
     else{
         ros::Duration diff_time = trails[id].header.stamp - trails[id].poses.front().header.stamp;
-        if(diff_time.toSec() > CCBSOCONFIG.pheromone_lasting){
+        while(diff_time.toSec() > CCBSOCONFIG.pheromone_lasting && !CCBSOCONFIG.pheromone_forever && !trails[id].poses.empty()){
             trails[id].poses.erase(trails[id].poses.begin());
+            diff_time = trails[id].header.stamp - trails[id].poses.front().header.stamp;
         }
-        else{
-            float mdis, mangle;// status changed
-            mdis = diffDis(trails[id].poses.back(),currPose);
-            mangle = diffAngle(trails[id].poses.back(),currPose);
-            // ros::Duration diff_time2 = trails[id].header.stamp - trails[id].poses.back().header.stamp;
-            if(mdis > CCBSOCONFIG.threDis || std::abs(mangle)> CCBSOCONFIG.threAngle){
-                trails[id].poses.push_back(currPose);
-            }
+        float mdis, mangle;// status changed
+        mdis = diffDis(trails[id].poses.back(),currPose);
+        mangle = diffAngle(trails[id].poses.back(),currPose);
+        // ros::Duration diff_time2 = trails[id].header.stamp - trails[id].poses.back().header.stamp;
+        if(mdis > CCBSOCONFIG.threDis || std::abs(mangle)> CCBSOCONFIG.threAngle){
+            trails[id].poses.push_back(currPose);
         }
     }
+    //publish nav::Path
     pub_pheromoneTrail.publish(trails[id]);
+    //publish geometry_msgs::PoseArray
+    if(CCBSOCONFIG.show_poseArray){
+        geometry_msgs::PoseArray poseArray;
+        poseArray.header = trails[id].header;
+        for(std::vector<geometry_msgs::PoseStamped>::iterator it = trails[id].poses.begin() ; it != trails[id].poses.end(); ++it){
+            poseArray.poses.push_back(it->pose);
+        }
+        pub_pheromoneTrail_.publish(poseArray);
+    }
 
     // Access pursuers' targets
     ros::NodeHandle nh;
@@ -201,7 +217,8 @@ void CCBSOPlanner::bsoSelection(std::pair<float,float>& nextPos){
         double p = rand()/double(RAND_MAX);
         for(int j=0;j<=10;j++){
             if(p <= pros(j,0)){
-                std::pair<float,float> pos(CCBSOCONFIG.searchDis/10.0*j,rand()%20*CCBSOCONFIG.searchAngle/20.0 - CCBSOCONFIG.searchAngle/2.0);
+                //std::pair<float,float> pos(CCBSOCONFIG.searchDis/10.0*j,rand()%20*CCBSOCONFIG.searchAngle/20.0 - CCBSOCONFIG.searchAngle/2.0);
+                std::pair<float,float> pos(CCBSOCONFIG.searchDis/10.0*j,i*CCBSOCONFIG.searchAngle/CCBSOCONFIG.psize - CCBSOCONFIG.searchAngle/2.0);
                 std::pair<double,int> individual(calFitness(pos),i);
                 nextPoses.push_back(pos);
                 individuals.emplace(individual);
@@ -274,6 +291,18 @@ void CCBSOPlanner::bsoSelection(std::pair<float,float>& nextPos){
             individuals.erase(worseIndi);
             individuals.emplace(newIndi);
         }
+        //Avoid hitting wall
+        std::pair<double,int> bestIndi;
+        getNthElement(individuals.begin(),0,bestIndi);
+        if(bestIndi.first > fmaxi){
+            newPos.first = 0.0;
+            newPos.second = rand()%20*CCBSOCONFIG.searchAngle/20.0 - CCBSOCONFIG.searchAngle/2.0;
+            newFitness = calFitness(newPos);
+            std::pair<double,int> newIndi(newFitness,bestIndi.second);
+            individuals.erase(bestIndi);
+            individuals.emplace(newIndi);
+            nextPoses[bestIndi.second] = newPos;
+        }
     }
     // choose the best one
     int ind;
@@ -304,7 +333,8 @@ double CCBSOPlanner::calFitness(std::pair<float,float>& pos){
     double fitness = 0;
     switch(state_){
         case SEARCHING:{
-            fitness += Fpheromone(pos) + Fobstacle(pos) + Fcruise(pos) + FangularAcc(pos);
+            // fitness += Fpheromone(pos) + Fobstacle(pos) + Fcruise(pos) + FangularAcc(pos);
+            fitness += Fpheromone(pos) + Fobstacle(pos) + FangularAcc(pos);
             break;
         }
         default:{
@@ -338,7 +368,13 @@ float CCBSOPlanner::Fobstacle(std::pair<float,float>& pos){
         // return scan.ranges[index] < CCBSOCONFIG.searchDis? exp(-(CCBSOCONFIG.searchDis - scan.ranges[index])/CCBSOCONFIG.searchDis): 0.0;
         //(2) Too close with the wall, it can turn direction when the wall is ahead,
         // but cannot judge the newPos is close to the wall or not. 
-        return scan.ranges[index] < CCBSOCONFIG.searchDis? exp(-(scan.ranges[index]-pos.first)/CCBSOCONFIG.searchDis): 0.0;
+        int index_l = index - 1 < 0? scan.ranges.size()-1: index-1;
+        int index_h = index + 1 > scan.ranges.size()-1? 0: index+1;
+        // Avoid hitting corner, consider near scan
+        double mini = scan.ranges[index_l] < scan.ranges[index_h]?scan.ranges[index_l]:scan.ranges[index_h];
+        mini = mini < scan.ranges[index]? mini: scan.ranges[index];
+        // return scan.ranges[index] < CCBSOCONFIG.searchDis? exp(-(scan.ranges[index]-pos.first)/CCBSOCONFIG.searchDis): 0.0;
+        return mini < CCBSOCONFIG.searchDis? exp(-(mini-pos.first)/CCBSOCONFIG.searchDis): 0.0;
 
     }
 
@@ -374,19 +410,26 @@ float CCBSOPlanner::Fpheromone(std::pair<float,float>& pos){
     float value = 0;
     float nextPose_x = pursuer_poses[id].x + pos.first*cos(pursuer_poses[id].theta+pos.second);
     float nextPose_y = pursuer_poses[id].y + pos.first*sin(pursuer_poses[id].theta+pos.second);
-
-    std::unique_lock<std::recursive_mutex> lock_tags(mutex_trails);
-    for(int i=1;i<=pnum;i++){
-        for(std::vector<geometry_msgs::PoseStamped>::iterator it = trails[i].poses.begin() ; it != trails[i].poses.end(); ++it){
-            float dis, dir, diffy, diffx; 
-            geometry_msgs::PoseStamped wayPoint = *it;
-            diffy = nextPose_y - wayPoint.pose.position.y ;
-            diffx = nextPose_x - wayPoint.pose.position.x ;
-            dis = hypot(diffy,diffx);
-            dir = atan2(diffy,diffx);
-            if( dis < CCBSOCONFIG.markedDis && std::abs(dir) < CCBSOCONFIG.markedAngle/2.0){
-                value = pheromone;
-                break;
+    if(trails[id].poses.size()>1){
+        float normlized_time = (trails[id].poses.back().header.stamp - trails[id].poses.front().header.stamp).toSec();
+        for(int i=1;i<=pnum;i++){
+            //Searching waypoint from new to old
+            for(std::vector<geometry_msgs::PoseStamped>::reverse_iterator it = trails[i].poses.rbegin() ; it != trails[i].poses.rend(); ++it){
+                float dis, dir, diffy, diffx; 
+                diffy = nextPose_y - it->pose.position.y ;
+                diffx = nextPose_x - it->pose.position.x ;
+                dis = hypot(diffy,diffx);
+                tf::Quaternion quat;
+                tf::quaternionMsgToTF(it->pose.orientation, quat);
+                dir = atan2(diffy,diffx)-tf::getYaw(quat);//pi-(-pi) could happen, so robot is easily make mistake when he is in the negative x-axis
+                // dir = theta2pi(atan2(diffy,diffx))-theta2pi(tf::getYaw(quat));//2pi -0  positive x-axis
+                if( dis < CCBSOCONFIG.markedDis && (std::abs(dir) < CCBSOCONFIG.markedAngle/2.0 || std::abs(std::abs(dir)-2*PI) < CCBSOCONFIG.markedAngle/2.0)){
+                    ros::Duration diff_time = ros::Time::now() - it->header.stamp;
+                    // Avoid stuck in visited place
+                    // value = CCBSOCONFIG.pheromone*(1+diff_time.toSec()/normlized_time);
+                    value = CCBSOCONFIG.pheromone*(2-diff_time.toSec()/normlized_time);
+                    break;
+                }
             }
         }
     }
@@ -396,7 +439,8 @@ float CCBSOPlanner::Fpheromone(std::pair<float,float>& pos){
 float CCBSOPlanner::Fcruise(std::pair<float,float>& pos){
     float nextPose_x = pursuer_poses[id].x + pos.first*cos(pursuer_poses[id].theta+pos.second);
     float nextPose_y = pursuer_poses[id].y + pos.first*sin(pursuer_poses[id].theta+pos.second);
-    return (5 - std::max(std::abs(nextPose_y), std::abs(nextPose_x)));
+    // return CCBSOCONFIG.weight_cruiser*(CCBSOCONFIG.cruiser_max - std::max(std::abs(nextPose_y), std::abs(nextPose_x)))/CCBSOCONFIG.cruiser_max;
+    return CCBSOCONFIG.weight_cruiser*hypot(nextPose_x, nextPose_y);
 }
 
 float CCBSOPlanner::FangularAcc(std::pair<float,float>& pos){
@@ -410,7 +454,7 @@ void CCBSOPlanner::resetFrequency(double frequency){
     controller_frequency_ = frequency;
 }
 
-void CCBSOPlanner::publishLookAheadPoint(std::pair<float,float>& pos){
+void CCBSOPlanner::publishLookAheadPoint(std::pair<float,float>& pos, bool switch_){
     visualization_msgs::Marker marker;
     // Set the frame ID and timestamp.  See the TF tutorials for information on these.
     marker.header.frame_id = fixed_frame_;
@@ -438,9 +482,14 @@ void CCBSOPlanner::publishLookAheadPoint(std::pair<float,float>& pos){
     marker.color.a = 1.0; // Don't forget to set the alpha!
     marker.color.r = 0.0;
     marker.color.g = 1.0;
-    marker.color.b = 1.0;
-    marker.lifetime = ros::Duration(0.1);
-    pub_lookAheadPoint.publish(marker);
+    marker.color.b = 0.0;
+    if(switch_){
+        marker.lifetime = ros::Duration(1.0);
+        pub_checkPoint.publish(marker);
+    }else{
+        marker.lifetime = ros::Duration(0.1);
+        pub_lookAheadPoint.publish(marker);
+    }
 }
 
 bool CCBSOPlanner::isGoalReached(){}

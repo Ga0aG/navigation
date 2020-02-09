@@ -6,3 +6,4 @@ float32 Fpheromone
 float32 Fobstacle
 float32 Fcruise
 float32 FangularAcc
+float32 sum
