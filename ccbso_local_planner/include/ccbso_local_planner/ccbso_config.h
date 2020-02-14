@@ -13,6 +13,7 @@ public:
 
     bool show_poseArray;
     bool pheromone_forever;
+    bool clear_pheromone;
 
     double max_vel_x, max_rot_vel;
     double acc_lim_x, acc_lim_theta;
@@ -26,6 +27,10 @@ public:
     double weight_aa;
     double weight_cruiser,cruiser_max;
     double pheromone;
+    double weight_pc;
+    double weight_k;
+    double weight_d, disToTarget;
+    
 
     static CCBSOConfig& getInstance();
     #define CCBSOCONFIG CCBSOConfig::getInstance()
@@ -45,7 +50,8 @@ private:
         psize = 20;
         iteration = 50;
         show_poseArray = true;
-        pheromone_forever = true;
+        pheromone_forever = false;
+        clear_pheromone = false;
         max_vel_x = 0.22;
         max_rot_vel = 2.75;
         acc_lim_x = 2.5;
@@ -64,7 +70,11 @@ private:
         weight_aa = 0.01;
         weight_cruiser = 2.0;
         cruiser_max = 5.0;
-        pheromone = 10.0;
+        pheromone = 2.0;
+        weight_pc = 5.0;//bigger than pheromone
+        weight_k = 2.0;
+        weight_d = 1.0;
+        disToTarget = 1.0;
     }
     static CCBSOConfig *instance;
 };
@@ -91,6 +101,7 @@ void CCBSOConfig::reconfigure(ccbso_local_planner::CCBSOPlannerConfig& cfg)
     iteration = cfg.iteration;
     show_poseArray = cfg.show_poseArray;
     pheromone_forever = cfg.pheromone_forever;
+    clear_pheromone = cfg.clear_pheromone;
     max_vel_x = cfg.max_vel_x;
     max_rot_vel = cfg.max_rot_vel;
     acc_lim_x = cfg.acc_lim_x;
@@ -110,6 +121,10 @@ void CCBSOConfig::reconfigure(ccbso_local_planner::CCBSOPlannerConfig& cfg)
     weight_cruiser = cfg.weight_cruiser;
     cruiser_max = cfg.cruiser_max;
     pheromone = cfg.pheromone;
+    weight_pc = cfg.weight_pc;
+    weight_k = cfg.weight_k;
+    weight_d = cfg.weight_d;
+    disToTarget = cfg.disToTarget;
 
     checkParameters();
 }

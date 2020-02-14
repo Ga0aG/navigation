@@ -595,8 +595,9 @@ namespace move_base {
         decision_->getState(robotState);
         tc_->setState(robotState);
         tc_->computeVelocityCommands(cmd_vel);
-        if(ccbso_localPlanner_enable)
+        if(ccbso_localPlanner_enable){
           vel_pub_.publish(cmd_vel);
+        }
       }
       r.sleep();
       //executeCycle(geometry_msgs::PoseStamped& goal, std::vector<geometry_msgs::PoseStamped>& global_plan)

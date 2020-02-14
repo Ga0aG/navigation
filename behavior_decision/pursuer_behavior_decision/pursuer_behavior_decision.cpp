@@ -326,7 +326,7 @@ void PursuerBehaviorDecision::getState(int &state){
     state =  state_;
     lock_map.unlock();
     ros::NodeHandle nh;
-    nh.setParam(ns+"target_id", target_id);
+    nh.setParam(ns+"/target_id", target_id);
     // target_pub.publish((int8_t)target_id);
 }
 

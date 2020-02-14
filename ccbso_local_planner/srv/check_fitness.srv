@@ -4,6 +4,9 @@ float32 delta_rot1
 ---
 float32 Fpheromone
 float32 Fobstacle
-float32 Fcruise
 float32 FangularAcc
+float32 FpotentialCollision
+float32 Fkeeping
+float32 FdisToTarget
 float32 sum
+

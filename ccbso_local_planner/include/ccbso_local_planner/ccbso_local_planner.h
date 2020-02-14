@@ -27,8 +27,9 @@
 
 #include "ccbso_config.h"
 #include <dynamic_reconfigure/server.h>
+#include <behavior_decision/evaderState.h>
 
-const float fmaxi = 100.0;
+const float fmaxi = 1000.0;
 //const float pheromone = 10;
 const float PI = 3.14159265;
 
@@ -67,34 +68,45 @@ namespace ccbso_local_planner{
     std::string states[4] = {"SEARCHING", "KEEPING", "TRACKING", "FOLLOWING"};
 
     ros::Subscriber sub_laser;
+    ros::Subscriber sub_path;
     ros::Publisher pub_pheromoneTrail; 
     ros::Publisher pub_pheromoneTrail_;
     ros::Publisher pub_lookAheadPoint;
+    ros::Publisher pub_state;
     ros::Publisher pub_checkPoint;
     std::vector<ros::Subscriber> sub_trails;
+    std::vector<ros::Subscriber> sub_evaderStates;
     ros::ServiceServer srv_check_fitness;
 
-    std::recursive_mutex mutex_scan, mutex_trails,mutex_pursuers;
+    std::recursive_mutex mutex_scan, mutex_trails, mutex_pursuers, mutex_path, mutex_evaders;
     sensor_msgs::LaserScan scan;
+    nav_msgs::Path trackingPath;
     std::map<int,int> targets;
     std::map<int,geometry_msgs::Pose2D> pursuer_poses;
     std::map<int,nav_msgs::Path> trails;
+    std::map<int,behavior_decision::evaderState> evaderStates;
     // std::map<int,geometry_msgs::PoseArray> trails;
 
     void reconfigureCB(CCBSOPlannerConfig &config, uint32_t level);
     void laserCallback(const sensor_msgs::LaserScanConstPtr &msg);
     void trailCallback(const nav_msgs::PathConstPtr &msg, int i);
+    void pathCallback(const nav_msgs::PathConstPtr &msg);
+    void evaderCallback(const behavior_decision::evaderStateConstPtr &msg);
     void publishLookAheadPoint(std::pair<float,float>& pos, bool switch_ = false);
     bool checkFitnessService(check_fitness::Request &req,
                              check_fitness::Response &res);
+    void publishState();
 
     void bsoSelection(std::pair<float,float>& nextPos);
     double calFitness(std::pair<float,float>& pos);
     float Fobstacle(std::pair<float,float>& pos); 
     bool isNearToObstacle(std::pair<float,float>& pos);
     float Fpheromone(std::pair<float,float>& pos);
-    float Fcruise(std::pair<float,float>& pos);
+    // float Fcruise(std::pair<float,float>& pos);
     float FangularAcc(std::pair<float,float>& pos);
+    float FpotentialCollision(std::pair<float,float>& pos);
+    float Fkeeping(std::pair<float,float>& pos);
+    float FdisToTarget(std::pair<float,float>& pos);
 
     inline void getNthElement(std::multiset<std::pair<double,int>>::iterator it, int n, std::pair<double,int>& individual){
       std::advance(it,n);
@@ -106,6 +118,7 @@ namespace ccbso_local_planner{
         return angle + 2*PI;
       }
       else{
+        angle = angle >= 2*PI ? angle - 2*PI: angle;
         return angle;
       }
     };
