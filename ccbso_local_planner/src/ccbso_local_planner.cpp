@@ -50,6 +50,7 @@ void CCBSOPlanner::initialize(std::string name, tf::TransformListener* tf, costm
     pub_lookAheadPoint = nh.advertise<visualization_msgs::Marker>(ns+"/lookAheadPoint",1);
     pub_checkPoint = nh.advertise<visualization_msgs::Marker>(ns+"/checkPoint",1);
     pub_state = nh.advertise<visualization_msgs::Marker>(ns+"/state",1);
+    pub_evaderState = nh.advertise<geometry_msgs::PoseStamped>(ns+"/evader_state_",1);
     srv_check_fitness = nh.advertiseService("check_fitness", &CCBSOPlanner::checkFitnessService, this);
 
     ros::NodeHandle private_nh(ns+"/" + name);
@@ -109,7 +110,7 @@ bool CCBSOPlanner::checkFitnessService(check_fitness::Request &req,
         }
         case KEEPING:{
             res.Fobstacle =  Fobstacle(pos);
-            res.FangularAcc = FangularAcc(pos);
+            // res.FangularAcc = FangularAcc(pos);
             res.FpotentialCollision = FpotentialCollision(pos);
             res.Fkeeping = Fkeeping(pos);
             res.FdisToTarget = FdisToTarget(pos);
@@ -151,6 +152,24 @@ bool CCBSOPlanner::computeVelocityCommands(geometry_msgs::Twist& cmd_vel){
         else{
             targets[i] = -1;
         }
+    }
+
+    // publish evader state
+    if(targets[id] != -1){
+        geometry_msgs::PoseStamped poseStamped;
+        poseStamped.header.stamp = ros::Time::now();
+        poseStamped.header.frame_id = fixed_frame_;
+        poseStamped.pose.position.x = evaderStates[targets[id]].x;
+        poseStamped.pose.position.y = evaderStates[targets[id]].y;
+        float yaw;
+        if(evaderStates[targets[id]].vx<1e-3 && evaderStates[targets[id]].vy<1e-3)
+            yaw = 0.0;
+        else
+            yaw = atan2(evaderStates[targets[id]].vy, evaderStates[targets[id]].vx);
+        tf::Quaternion quat;
+        quat.setRPY(0.0,0.0,yaw);
+        tf::quaternionTFToMsg(quat, poseStamped.pose.orientation);
+        pub_evaderState.publish(poseStamped);
     }
 
     // get pursuers' poses
@@ -244,37 +263,27 @@ bool CCBSOPlanner::computeVelocityCommands(geometry_msgs::Twist& cmd_vel){
 }
 
 void CCBSOPlanner::bsoSelection(std::pair<float,float>& nextPos){
-    // // Roulette Wheel Selection
-    // // Sampling within a sector
-    // Eigen::Matrix<float, 11, 1> pros;
-    // float sum = 1;
-    // // if(state_ == SEARCHING)
-    // //     sum = 1;
-    // // else
-    // //     sum = 5;//give ro=0 bigger propertity
-    // for(int i=0;i<=10;i++){
-    //     sum += i;
-    //     pros(i,0)=sum;
-    // }
-    // pros = pros/sum;
 
     // odometry motion model
     std::vector<std::pair<float,float>> nextPoses;//delta_trans,delta_rot1
     std::multiset<std::pair<double,int>> individuals;//fitness,index, Ascending order
+    // TODO, Add * delta_time?;
+    float searchDis = (state_ == KEEPING || state_ == FOLLOWING)? CCBSOCONFIG.max_vel_x : CCBSOCONFIG.searchDis;
     
-    // uniformly sampling
+    // uniformly sampling, Add positive velocity
     for(int i=0;i<CCBSOCONFIG.psize;i++){
         double p = rand()/double(RAND_MAX);
-        std::pair<float,float> pos(p*CCBSOCONFIG.searchDis,i*CCBSOCONFIG.searchAngle/CCBSOCONFIG.psize - CCBSOCONFIG.searchAngle/2.0);
+        std::pair<float,float> pos(p*searchDis,i*CCBSOCONFIG.searchAngle/CCBSOCONFIG.psize - CCBSOCONFIG.searchAngle/2.0);
         std::pair<double,int> individual(calFitness(pos),i);
         nextPoses.push_back(pos);
         individuals.emplace(individual);
     }
 
+    // Add negative velocity
     if(state_== KEEPING || state_ == FOLLOWING){
         for(int i=0;i<CCBSOCONFIG.psize;i++){
             double p = rand()/double(RAND_MAX);
-            std::pair<float,float> newPos(-p*CCBSOCONFIG.searchDis,i*CCBSOCONFIG.searchAngle/CCBSOCONFIG.psize - CCBSOCONFIG.searchAngle/2.0);
+            std::pair<float,float> newPos(-p*searchDis,i*CCBSOCONFIG.searchAngle/CCBSOCONFIG.psize - CCBSOCONFIG.searchAngle/2.0);
             double newFitness = calFitness(newPos);
             std::pair<double,int> worseIndi;
             getNthElement(individuals.begin(),CCBSOCONFIG.psize-1,worseIndi);
@@ -286,6 +295,7 @@ void CCBSOPlanner::bsoSelection(std::pair<float,float>& nextPos){
             }
         }
     }
+    
 
     // Add zero velocity individual
     for(int i=0;i<6;i++){
@@ -301,29 +311,6 @@ void CCBSOPlanner::bsoSelection(std::pair<float,float>& nextPos){
         }
     }
     
-    // for(int i=0;i<CCBSOCONFIG.psize;i++){
-    //     double p = rand()/double(RAND_MAX);
-    //     for(int j=0;j<=10;j++){
-    //         if(p <= pros(j,0)){
-    //             //std::pair<float,float> pos(CCBSOCONFIG.searchDis/10.0*j,rand()%20*CCBSOCONFIG.searchAngle/20.0 - CCBSOCONFIG.searchAngle/2.0);
-    //             std::pair<float,float> pos;
-    //             pos.second = i*CCBSOCONFIG.searchAngle/CCBSOCONFIG.psize - CCBSOCONFIG.searchAngle/2.0;
-    //             if(state_ == SEARCHING || state_ == FOLLOWING){
-    //                 pos.first = CCBSOCONFIG.searchDis/10.0*j;
-    //             }
-    //             else{
-    //                 pos.first = CCBSOCONFIG.searchDis/10.0*j - CCBSOCONFIG.searchDis/2.0;
-    //             }
-    //             std::pair<double,int> individual(calFitness(pos),i);
-    //             nextPoses.push_back(pos);
-    //             individuals.emplace(individual);
-    //             break;
-    //         }
-    //     }
-    // }
-
-
-
     // update individual
     for(int i=0;i<CCBSOCONFIG.iteration;i++){
         //generate new individual
@@ -331,13 +318,14 @@ void CCBSOPlanner::bsoSelection(std::pair<float,float>& nextPos){
         double p1 = rand()/double(RAND_MAX);
         double p2 = rand()/double(RAND_MAX);
         // Divide indiviudals into half elitist and half normal
+        float Rstep = (state_ == KEEPING || state_ == FOLLOWING)? CCBSOCONFIG.Rstep/2.0 : CCBSOCONFIG.Rstep;
         if(p1<CCBSOCONFIG.Pelitist){
             if(p2<CCBSOCONFIG.Pone){
                 std::pair<double,int> pair_;
                 int ind = rand()%(CCBSOCONFIG.psize/2);
                 getNthElement(individuals.begin(),ind,pair_);
                 newPos = nextPoses[pair_.second];
-                newPos.first += CCBSOCONFIG.Rstep*(rand()/double(RAND_MAX)-0.5)*2;
+                newPos.first += Rstep*(rand()/double(RAND_MAX)-0.5)*2;
                 newPos.second += CCBSOCONFIG.Astep*(rand()/double(RAND_MAX)-0.5)*2;
             }
             else{
@@ -356,7 +344,7 @@ void CCBSOPlanner::bsoSelection(std::pair<float,float>& nextPos){
                 int ind = rand()%(CCBSOCONFIG.psize/2);
                 getNthElement(individuals.begin(),ind+CCBSOCONFIG.psize/2,pair_);
                 newPos = nextPoses[pair_.second];
-                newPos.first += CCBSOCONFIG.Rstep*(rand()/double(RAND_MAX)-0.5)*2;
+                newPos.first += Rstep*(rand()/double(RAND_MAX)-0.5)*2;
                 newPos.second += CCBSOCONFIG.Astep*(rand()/double(RAND_MAX)-0.5)*2;
             }
             else{
@@ -369,8 +357,9 @@ void CCBSOPlanner::bsoSelection(std::pair<float,float>& nextPos){
                 newPos.second = nextPoses[pair1.second].second/2.0+nextPoses[pair2.second].second/2.0;
             }
         }
+
         // verify the effectiveness of individual
-        if(std::abs(newPos.second) > CCBSOCONFIG.searchAngle / 2.0 || std::abs(newPos.first) > CCBSOCONFIG.searchDis){
+        if(std::abs(newPos.second) > CCBSOCONFIG.searchAngle / 2.0 || std::abs(newPos.first) > searchDis){
             i--;
             continue;
         } 
@@ -379,6 +368,8 @@ void CCBSOPlanner::bsoSelection(std::pair<float,float>& nextPos){
             i--;
             continue;
         }
+
+        // Replace bad individual
         double newFitness = calFitness(newPos);
         std::pair<double,int> worseIndi;
         getNthElement(individuals.begin(),CCBSOCONFIG.psize-1,worseIndi);
@@ -388,6 +379,7 @@ void CCBSOPlanner::bsoSelection(std::pair<float,float>& nextPos){
             individuals.erase(worseIndi);
             individuals.emplace(newIndi);
         }
+
         //Avoid hitting wall, spinning to find an angle to escape
         std::pair<double,int> bestIndi;
         getNthElement(individuals.begin(),0,bestIndi);
@@ -395,15 +387,6 @@ void CCBSOPlanner::bsoSelection(std::pair<float,float>& nextPos){
             newPos.first = 0.0;
             newPos.second = 0.3;
             newFitness = calFitness(newPos);
-            // newFitness = 2*fmaxi;
-            // for(int j=0;j<CCBSOCONFIG.psize;j++){
-            //     std::pair<float,float> tempPos(0.0, CCBSOCONFIG.searchAngle/CCBSOCONFIG.psize * j - CCBSOCONFIG.searchAngle/2.0);
-            //     double tempFitness = calFitness(tempPos);
-            //     if(tempFitness < newFitness){
-            //         newFitness = tempFitness;
-            //         newPos = tempPos;
-            //     }
-            // }
             std::pair<double,int> newIndi(newFitness,bestIndi.second);
             individuals.clear();
             individuals.emplace(newIndi);
@@ -411,19 +394,11 @@ void CCBSOPlanner::bsoSelection(std::pair<float,float>& nextPos){
             break;
         }
     }
+    
     // choose the best one
     if(individuals.size()){
         int ind = (*individuals.begin()).second;
         nextPos = nextPoses[ind];
-        // std::pair<double,int> worseIndi;
-        // getNthElement(individuals.begin(),CCBSOCONFIG.psize-1,worseIndi);
-        // float posTheta = theta2pi(nextPos.second);
-        // int index = round(posTheta/scan.angle_increment);
-        // float irange = 0.0;
-        // if(received_scan){
-        //     irange = scan.ranges[index];
-        // }
-        // ROS_INFO("robot%i:distance:%f, angle:%f, value:%lf, scan range: %f",id,nextPos.first,nextPos.second,(*individuals.begin()).first,irange);
         ROS_DEBUG_NAMED("result","robot%i:distance:%f, angle:%f, value:%lf",id,nextPos.first,nextPos.second,(*individuals.begin()).first);
         switch(state_){
             case SEARCHING:{
@@ -450,7 +425,7 @@ double CCBSOPlanner::calFitness(std::pair<float,float>& pos){
             break;
         }
         case KEEPING:{
-            fitness += Fobstacle(pos) + FangularAcc(pos) + FpotentialCollision(pos) + Fkeeping(pos) + FdisToTarget(pos);
+            fitness += Fobstacle(pos) + FpotentialCollision(pos) + Fkeeping(pos) + FdisToTarget(pos);
             break;
         }
         default:{
@@ -663,7 +638,7 @@ float CCBSOPlanner::Fkeeping(std::pair<float,float>& pos){
         ROS_ERROR("Keeper don't have a target");
     }
     float target_dir = theta2pi(atan2(evaderStates[targets[id]].y - nextPos.y, evaderStates[targets[id]].x - nextPos.x));
-    float value = CCBSOCONFIG.weight_k * std::abs(target_dir - nextPos.theta);
+    float value = CCBSOCONFIG.weight_k * std::min(std::abs(target_dir - nextPos.theta), 2*PI - std::abs(target_dir - nextPos.theta));
     return value;
 }
 

@@ -72,8 +72,9 @@ namespace ccbso_local_planner{
     ros::Publisher pub_pheromoneTrail; 
     ros::Publisher pub_pheromoneTrail_;
     ros::Publisher pub_lookAheadPoint;
-    ros::Publisher pub_state;
     ros::Publisher pub_checkPoint;
+    ros::Publisher pub_state;
+    ros::Publisher pub_evaderState;
     std::vector<ros::Subscriber> sub_trails;
     std::vector<ros::Subscriber> sub_evaderStates;
     ros::ServiceServer srv_check_fitness;
