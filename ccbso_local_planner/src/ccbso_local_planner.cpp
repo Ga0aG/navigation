@@ -24,6 +24,11 @@ void CCBSOPlanner::initialize(std::string name, tf::TransformListener* tf, costm
     if( slash != std::string::npos ){
         ns_tf2 = ns.substr(slash+1);
     }
+
+    ros::NodeHandle nh_("~");
+    nh_.param("controller_frequency"      , controller_frequency_, 20.0);
+    // ROS_WARN("frequency: %lf",controller_frequency_);
+
     ros::NodeHandle nh(ns);
     ROS_INFO("NAMESPACE:%s",ns.c_str());
     nh.param("tf_prefix",tf_prefix,std::string("robot"));
@@ -50,8 +55,11 @@ void CCBSOPlanner::initialize(std::string name, tf::TransformListener* tf, costm
     pub_lookAheadPoint = nh.advertise<visualization_msgs::Marker>(ns+"/lookAheadPoint",1);
     pub_checkPoint = nh.advertise<visualization_msgs::Marker>(ns+"/checkPoint",1);
     pub_state = nh.advertise<visualization_msgs::Marker>(ns+"/state",1);
-    pub_evaderState = nh.advertise<geometry_msgs::PoseStamped>(ns+"/evader_state_",1);
     srv_check_fitness = nh.advertiseService("check_fitness", &CCBSOPlanner::checkFitnessService, this);
+
+    // debug
+    pub_evaderState = nh.advertise<geometry_msgs::PoseStamped>(ns+"/evader_state_",1);
+    pub_direction = nh.advertise<geometry_msgs::PoseStamped>(ns+"/cmd_vel_tend",1);
 
     ros::NodeHandle private_nh(ns+"/" + name);
     CCBSOCONFIG.loadRosParamFromNodeHandle(private_nh);
@@ -98,6 +106,7 @@ bool CCBSOPlanner::checkFitnessService(check_fitness::Request &req,
     std::unique_lock<std::recursive_mutex> lock_scan(mutex_scan);
     std::unique_lock<std::recursive_mutex> lock_path(mutex_path);
     std::unique_lock<std::recursive_mutex> lock_evaders(mutex_evaders);
+    std::unique_lock<std::recursive_mutex> lock_targets(mutex_targets);
     std::pair<float,float> pos(req.delta_trans, req.delta_rot1);
     switch(state_){
         case SEARCHING:{
@@ -109,14 +118,16 @@ bool CCBSOPlanner::checkFitnessService(check_fitness::Request &req,
             break;
         }
         case KEEPING:{
+            // try{res.Fobstacle =  Fobstacle(pos);}catch(...){ROS_WARN(">>>>>>>>>>>>Fobstacle");}
+            // try{res.FpotentialCollision = FpotentialCollision(pos);}catch(...){ROS_WARN(">>>>>>>>>>>>FpotentialCollision");}
+            // try{res.Fkeeping = Fkeeping(pos);}catch(...){ROS_WARN(">>>>>>>>>>>>Fkeeping");}
+            // try{res.FdisToTarget = FdisToTarget(pos);}catch(...){ROS_WARN(">>>>>>>>>>>>FdisToTarget");}
             res.Fobstacle =  Fobstacle(pos);
             // res.FangularAcc = FangularAcc(pos);
             res.FpotentialCollision = FpotentialCollision(pos);
             res.Fkeeping = Fkeeping(pos);
             res.FdisToTarget = FdisToTarget(pos);
-            res.sum = res.Fobstacle+res.FpotentialCollision+res.FangularAcc+res.Fkeeping+res.FdisToTarget;
-            // res.element1 = evaderStates[targets[id]].x;
-            // res.element2 = evaderStates[targets[id]].y;
+            res.sum = res.Fobstacle+res.FpotentialCollision+res.Fkeeping+res.FdisToTarget;
         }
         default:{
             break;
@@ -134,12 +145,16 @@ bool CCBSOPlanner::setState(int &state){
 }
 
 bool CCBSOPlanner::computeVelocityCommands(geometry_msgs::Twist& cmd_vel){
+    
+    // ros::Time start = ros::Time::now();
+
     // thread safety
-    std::unique_lock<std::recursive_mutex> lock_pursuers(mutex_pursuers);
     std::unique_lock<std::recursive_mutex> lock_trails(mutex_trails);
     std::unique_lock<std::recursive_mutex> lock_scan(mutex_scan);
     std::unique_lock<std::recursive_mutex> lock_path(mutex_path);
     std::unique_lock<std::recursive_mutex> lock_evaders(mutex_evaders);
+    std::unique_lock<std::recursive_mutex> lock_pursuers(mutex_pursuers);
+    std::unique_lock<std::recursive_mutex> lock_targets(mutex_targets);
     geometry_msgs::PoseStamped currPose;
     
     // Access pursuers' targets
@@ -162,14 +177,16 @@ bool CCBSOPlanner::computeVelocityCommands(geometry_msgs::Twist& cmd_vel){
         poseStamped.pose.position.x = evaderStates[targets[id]].x;
         poseStamped.pose.position.y = evaderStates[targets[id]].y;
         float yaw;
-        if(evaderStates[targets[id]].vx<1e-3 && evaderStates[targets[id]].vy<1e-3)
-            yaw = 0.0;
-        else
+        if(evaderStates[targets[id]].vx>1e-3 || evaderStates[targets[id]].vy>1e-3){
+        //     yaw = 0.0;
+        // else
             yaw = atan2(evaderStates[targets[id]].vy, evaderStates[targets[id]].vx);
-        tf::Quaternion quat;
-        quat.setRPY(0.0,0.0,yaw);
-        tf::quaternionTFToMsg(quat, poseStamped.pose.orientation);
-        pub_evaderState.publish(poseStamped);
+            tf::Quaternion quat;
+            quat.setRPY(0.0,0.0,yaw);
+            tf::quaternionTFToMsg(quat, poseStamped.pose.orientation);
+            pub_evaderState.publish(poseStamped);
+            // ROS_WARN("Velocity: vy: %f, vx: %f, yaw: %f",evaderStates[targets[id]].vy,evaderStates[targets[id]].vx, yaw/PI*180);
+        }
     }
 
     // get pursuers' poses
@@ -198,7 +215,6 @@ bool CCBSOPlanner::computeVelocityCommands(geometry_msgs::Twist& cmd_vel){
             currPose.pose.orientation.w = pursuser_transform.getRotation().w();
         }
     }
-    
     publishState();
 
     // Publish trail
@@ -242,6 +258,21 @@ bool CCBSOPlanner::computeVelocityCommands(geometry_msgs::Twist& cmd_vel){
     
     std::pair<float,float> nextPos;//delta_trans,delta_rot1
     bsoSelection(nextPos);
+
+    // Publish cmd_vel's direction
+    if(std::abs(nextPos.first) > 1e-3 || std::abs(nextPos.second) > 1e-3){
+        geometry_msgs::PoseStamped indir;//direction of individual
+        indir.header.stamp = ros::Time::now();
+        indir.header.frame_id = fixed_frame_;
+        indir.pose.position.x = pursuer_poses[id].x ;//+ nextPos.first*cos(pursuer_poses[id].theta+nextPos.second);
+        indir.pose.position.y = pursuer_poses[id].y ;//+ nextPos.first*sin(pursuer_poses[id].theta+nextPos.second);
+        float yaw = nextPos.first < 0 ? nextPos.second + PI: nextPos.second;
+        yaw += pursuer_poses[id].theta;
+        tf::Quaternion quat;
+        quat.setRPY(0.0,0.0,yaw);
+        tf::quaternionTFToMsg(quat, indir.pose.orientation);
+        pub_direction.publish(indir);
+    }
     
     // compute velocity
     cmd_vel.linear.x = 0.0;
@@ -258,8 +289,13 @@ bool CCBSOPlanner::computeVelocityCommands(geometry_msgs::Twist& cmd_vel){
         cmd_vel.linear.x = cmd_vel.linear.x > 0 ? CCBSOCONFIG.max_vel_x: -CCBSOCONFIG.max_vel_x;
     }
     // cmd_vel.angular.z = nextPos.second * 0.1;//performs bad when times 1/control_frequency
-    cmd_vel.angular.z = nextPos.first > 0? nextPos.second: -nextPos.second;
+    cmd_vel.angular.z = nextPos.second;
     publishLookAheadPoint(nextPos);
+
+    //debug
+    // ros::Duration cost_time = ros::Time::now() - start;
+    // ROS_INFO(">>>>>>>>>>>>>time: %f",cost_time.toSec());
+    // 0.01s
 }
 
 void CCBSOPlanner::bsoSelection(std::pair<float,float>& nextPos){
@@ -295,13 +331,14 @@ void CCBSOPlanner::bsoSelection(std::pair<float,float>& nextPos){
             }
         }
     }
-    
 
-    // Add zero velocity individual
+    // Add zero linear/angular velocity individual
     for(int i=0;i<6;i++){
         std::pair<double,int> worseIndi;
         getNthElement(individuals.begin(),CCBSOCONFIG.psize-1,worseIndi);
-        std::pair<float,float> newPos(0,i*CCBSOCONFIG.searchAngle/6.0 - CCBSOCONFIG.searchAngle/2.0);
+        std::pair<float,float> newPos;
+        newPos.first = (i == 0 && state_ == SEARCHING)? CCBSOCONFIG.markedDis + 0.1: 0.0;
+        newPos.second = (i == 0)? 0.0:(i*CCBSOCONFIG.searchAngle/6.0 - CCBSOCONFIG.searchAngle/2.0);
         double newFitness = calFitness(newPos);
         if(newFitness < worseIndi.first){
             std::pair<double,int> newIndi(newFitness,worseIndi.second);
@@ -405,6 +442,9 @@ void CCBSOPlanner::bsoSelection(std::pair<float,float>& nextPos){
                 //ROS_INFO("robot%i:Fpheromone:%f, Fobstacle:%f, Fcruise:%f, FangularAcc:%f",id,Fpheromone(nextPos),Fobstacle(nextPos),Fcruise(nextPos), FangularAcc(nextPos));
                 break;
             }
+            case KEEPING:{
+                ROS_DEBUG_NAMED("value","Fobstacle(pos):%f, FpotentialCollision(pos):%f, Fkeeping:%f, FdisToTarget:%f", Fobstacle(nextPos), FpotentialCollision(nextPos), Fkeeping(nextPos), FdisToTarget(nextPos));
+            }
             default:{
                 break;
             }
@@ -437,20 +477,16 @@ double CCBSOPlanner::calFitness(std::pair<float,float>& pos){
 
 float CCBSOPlanner::Fobstacle(std::pair<float,float>& pos){
     if(!received_scan) return 0.0;
-    // TODO
-    // if there's pursuer between robot and pos, return 0;
+    // if the obstacle is target, return 0.0
+    geometry_msgs::Pose2D nextPos;
+    nextPos.x = pursuer_poses[id].x+pos.first*cos(pursuer_poses[id].theta+pos.second);
+    nextPos.y = pursuer_poses[id].y+pos.first*sin(pursuer_poses[id].theta+pos.second);
+    if(!evaderStates[targets[id]].lost && hypot(evaderStates[targets[id]].y - nextPos.y, evaderStates[targets[id]].x - nextPos.x) - 0.1 < robot_radius){
+        return 0.0;
+    }
+
     float posTheta = pos.first < 0? theta2pi(pos.second+PI) : theta2pi(pos.second);
-    // geometry_msgs::Pose2D ipursuer = pursuer_poses[id];
-    // for(int i=1;i<=pnum;i++){
-    //     if(i != id){
-    //         geometry_msgs::Pose2D pursuerx = pursuer_poses[i];
-    //         float dis = hypot(pursuerx.y - ipursuer.y, pursuerx.x -  ipursuer.x);
-    //         float azimuth = theta2pi(atan2(pursuerx.y - ipursuer.y, pursuerx.x -  ipursuer.x));
-    //         int ind = round(azimuth/scan.angle_increment);
-    //         if(scan.ranges[ind] < pos.first - robot_radius/2.0 && sqrt(pow(dis,2)+pow(pos.first,2)-2*dis*pos.first*cos(azimuth-pos.second)) < robot_radius)
-    //             return 0.0;
-    //     }
-    // }
+  
     int index = round(posTheta/scan.angle_increment);
     try{
         if(scan.ranges[index] < std::abs(pos.first) || scan.ranges[index] < robot_radius || isNearToObstacle(pos))
@@ -531,13 +567,6 @@ float CCBSOPlanner::Fpheromone(std::pair<float,float>& pos){
     }
     return value;
 }
-
-// float CCBSOPlanner::Fcruise(std::pair<float,float>& pos){
-//     float nextPose_x = pursuer_poses[id].x + pos.first*cos(pursuer_poses[id].theta+pos.second);
-//     float nextPose_y = pursuer_poses[id].y + pos.first*sin(pursuer_poses[id].theta+pos.second);
-//     // return CCBSOCONFIG.weight_cruiser*(CCBSOCONFIG.cruiser_max - std::max(std::abs(nextPose_y), std::abs(nextPose_x)))/CCBSOCONFIG.cruiser_max;
-//     return CCBSOCONFIG.weight_cruiser*hypot(nextPose_x, nextPose_y);
-// }
 
 float CCBSOPlanner::FangularAcc(std::pair<float,float>& pos){
     // preference : 
@@ -633,10 +662,23 @@ float CCBSOPlanner::Fkeeping(std::pair<float,float>& pos){
     float theta = pos.first < 0? pos.second + PI: pos.second;
     nextPos.x = pursuer_poses[id].x+pos.first*cos(pursuer_poses[id].theta+pos.second);
     nextPos.y = pursuer_poses[id].y+pos.first*sin(pursuer_poses[id].theta+pos.second);
+    // nextPos.theta = theta2pi(pursuer_poses[id].theta + pos.second);
+    
+    // robot cannot turn enough angle
     nextPos.theta = theta2pi(pursuer_poses[id].theta + 2*pos.second);
+    
+    // oscillation heavily
+    // nextPos.x = pursuer_poses[id].x+pos.first*cos(pursuer_poses[id].theta+pos.second)/controller_frequency_ ;
+    // nextPos.y = pursuer_poses[id].y+pos.first*sin(pursuer_poses[id].theta+pos.second)/controller_frequency_ ;
+    // nextPos.theta = theta2pi(pursuer_poses[id].theta + 2*pos.second/controller_frequency_ );
+    // ROS_INFO("position: x:%f, y: %f, theta:%f, frequency:%lf",nextPos.x, nextPos.y, nextPos.theta, controller_frequency_);
+    
     if(targets[id]==-1){
         ROS_ERROR("Keeper don't have a target");
     }
+    // float target_nexty = evaderStates[targets[id]].y + evaderStates[targets[id]].vy / controller_frequency_ ;
+    // float target_nextx = evaderStates[targets[id]].x + evaderStates[targets[id]].vx / controller_frequency_ ;
+    // float target_dir = theta2pi(atan2(target_nexty, target_nextx));
     float target_dir = theta2pi(atan2(evaderStates[targets[id]].y - nextPos.y, evaderStates[targets[id]].x - nextPos.x));
     float value = CCBSOCONFIG.weight_k * std::min(std::abs(target_dir - nextPos.theta), 2*PI - std::abs(target_dir - nextPos.theta));
     return value;
@@ -653,6 +695,7 @@ float CCBSOPlanner::FdisToTarget(std::pair<float,float>& pos){
 
 void CCBSOPlanner::resetFrequency(double frequency){
     controller_frequency_ = frequency;
+    // ROS_INFO("resetFrequency: %lf", controller_frequency_);
 }
 
 void CCBSOPlanner::publishLookAheadPoint(std::pair<float,float>& pos, bool switch_){
@@ -745,25 +788,4 @@ void CCBSOPlanner::publishState(){
 bool CCBSOPlanner::isGoalReached(){}
 
 bool CCBSOPlanner::setPlan(const std::vector<geometry_msgs::PoseStamped>& plan){}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 

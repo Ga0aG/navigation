@@ -75,11 +75,12 @@ namespace ccbso_local_planner{
     ros::Publisher pub_checkPoint;
     ros::Publisher pub_state;
     ros::Publisher pub_evaderState;
+    ros::Publisher pub_direction;
     std::vector<ros::Subscriber> sub_trails;
     std::vector<ros::Subscriber> sub_evaderStates;
     ros::ServiceServer srv_check_fitness;
 
-    std::recursive_mutex mutex_scan, mutex_trails, mutex_pursuers, mutex_path, mutex_evaders;
+    std::recursive_mutex mutex_scan, mutex_trails, mutex_pursuers, mutex_path, mutex_evaders, mutex_targets;
     sensor_msgs::LaserScan scan;
     nav_msgs::Path trackingPath;
     std::map<int,int> targets;
