@@ -592,6 +592,7 @@ namespace move_base {
       if(automatic){
         int robotState;
         geometry_msgs::Twist cmd_vel;
+        std::string ns = ros::this_node::getNamespace();
         decision_->getState(robotState);
         tc_->setState(robotState);
         tc_->computeVelocityCommands(cmd_vel);

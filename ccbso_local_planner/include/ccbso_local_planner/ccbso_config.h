@@ -30,7 +30,8 @@ public:
     double weight_pc;
     double weight_k;
     double weight_d, disToTarget;
-    
+    double weight_g, disToSubgoal;
+    double weight_u;
 
     static CCBSOConfig& getInstance();
     #define CCBSOCONFIG CCBSOConfig::getInstance()
@@ -75,6 +76,9 @@ private:
         weight_k = 2.0;
         weight_d = 1.0;
         disToTarget = 1.0;
+        weight_g = 1.0;
+        disToSubgoal = 0.3;
+        weight_u = 0.2;
     }
     static CCBSOConfig *instance;
 };
@@ -125,7 +129,9 @@ void CCBSOConfig::reconfigure(ccbso_local_planner::CCBSOPlannerConfig& cfg)
     weight_k = cfg.weight_k;
     weight_d = cfg.weight_d;
     disToTarget = cfg.disToTarget;
-
+    weight_g = cfg.weight_g;
+    disToSubgoal = cfg.disToSubgoal;
+    weight_u = cfg.weight_u;
     checkParameters();
 }
     

@@ -33,7 +33,7 @@ void PursuerBehaviorDecision::initialize(std::string name, tf::TransformListener
     private_nh.param("fixed_frame"               , fixed_frame_, std::string("/map"));
     private_nh.param("/global_namespace"         , gns, std::string("/robot"));
     private_nh.param("controller_frequency"      , controller_frequency_, 20.0);
-    private_nh.param("lost_time_threshold"       , lost_time_threshold_, 3.0);
+    private_nh.param("lost_time_threshold"       , lost_time_threshold_, 1.5);
     private_nh.param("maxiFollower"              , maxiFollower, 3); // Now is fixed
     private_nh.param("tracking2followingThre"    , tracking2followingThre, 2.0);
     private_nh.param("AdujustPathThre"           , AdujustPathThre, 1); //grid dis
@@ -126,8 +126,9 @@ void PursuerBehaviorDecision::mapCallback(const nav_msgs::OccupancyGrid::ConstPt
 void PursuerBehaviorDecision::dis2evadersCallback(const behavior_decision::dis2evaders::ConstPtr& msg){
     std::unique_lock<std::recursive_mutex> lock_costs(mutex_costs);
     std::map<int,double> cost;
-    for(int i = 0; i != msg->evader_ids.size();i++){
+    for(int i = 0; i < msg->evader_ids.size();i++){
         cost[msg->evader_ids[i]] = msg->dis[i];
+        if(msg->dis[i] < 0 ) ROS_ERROR("Distance ERROR, dis: %lf", msg->dis[i]);
     }
     costs[msg->robot_id] = cost;
 }
@@ -135,8 +136,8 @@ void PursuerBehaviorDecision::dis2evadersCallback(const behavior_decision::dis2e
 // core function
 void PursuerBehaviorDecision::getState(int &state){
     std::unique_lock<std::recursive_mutex> lock_tags(mutex_tags);
-    apriltag_ros::AprilTagDetectionArray msg = tags;
-    lock_tags.unlock();
+    std::unique_lock<std::recursive_mutex> lock_states(mutex_evaderStates);
+    std::unique_lock<std::recursive_mutex> lock_map(mutex_map);
 
     // calculate robot pose
     tf::StampedTransform robot_transform;
@@ -155,11 +156,21 @@ void PursuerBehaviorDecision::getState(int &state){
     bool lostTarget = true;
     Eigen::Matrix<double,4,1> estimatedState; // estimate position and velocity(2d) of target evader
 
-    std::unique_lock<std::recursive_mutex> states_lock(mutex_evaderStates);
-    // Check for the robot's detection first
-    // if(!msg.detections.empty()){
-    for (int i = 0; i != msg.detections.size();i++){
-        tag_id = msg.detections[i].id[0];
+    // Check for estimate evader state published by other pursuer is available (time)
+    // if( detected.size()){
+    for (auto it=detected.begin(); it!=detected.end(); ++it){
+        behavior_decision::evaderState evaderState_ = it -> second;
+        ros::Duration diff_time = ros::Time::now() - evaderState_.header.stamp;
+        if(diff_time.toSec() > lost_time_threshold_ || evaderState_.lost){
+            detected.erase(it -> first);
+            ROS_DEBUG_NAMED("state_transition","robot%d :Lost target : %d, size of detected:%zd, target_id:%d", id, it -> first, detected.size(),target_id);
+        }
+    }
+    // }
+
+    // Check for the robot's detection 
+    for (int i = 0; i != tags.detections.size();i++){
+        tag_id = tags.detections[i].id[0];
         // update target state
         if(tag_id == target_id){
             try{
@@ -216,7 +227,7 @@ void PursuerBehaviorDecision::getState(int &state){
             }
         }
     }
-    // }
+    lock_tags.unlock();
 
     // Keeper publish evader's state
     if(state_ == KEEPING){
@@ -242,22 +253,12 @@ void PursuerBehaviorDecision::getState(int &state){
         }
     }
 
-    // Check for estimate evader state published by other pursuer is available (time)
-    if( detected.size()){
-        for (std::map<int,behavior_decision::evaderState>::iterator it=detected.begin(); it!=detected.end(); ++it){
-            behavior_decision::evaderState evaderState_ = it -> second;
-            ros::Duration diff_time = ros::Time::now() - evaderState_.header.stamp;
-            if(diff_time.toSec() > lost_time_threshold_){
-                detected.erase(it -> first);
-                ROS_DEBUG_NAMED("state_transition","robot%d :Lost target : %d, size of detected:%zd, target_id:%d", id, it -> first, detected.size(),target_id);
-            }
-        }
-    }
     // For TRACKING or FOLLOWING robot
     if(target_id >= 0 && detected.find(target_id)==detected.end()){
         dis2evaders.erase(target_id);
         path2evaders.erase(target_id);// it's fine if target_id is not existed
         target_id = -1;
+        state_ = SEARCHING;
         ROS_DEBUG_NAMED("state_transition","robot%d :Lost target :state transform to SEARCHING (TEMPT).",id);
     }
     // ROS_DEBUG("robot%d 1",id);
@@ -265,7 +266,6 @@ void PursuerBehaviorDecision::getState(int &state){
     int start_x, start_y;
     std::map<int, std::pair<int,int>> target_poses;
 
-    std::unique_lock<std::recursive_mutex> lock_map(mutex_map);
     if(state_ != KEEPING && !detected.empty()){
         // transform robot and evader' poses from world to map
         // and calculate the distance between robot and each evader
@@ -282,8 +282,10 @@ void PursuerBehaviorDecision::getState(int &state){
             target_poses[it->second.target_id] = pair_;
 
         }
-
+   
+        //if(state_==FOLLOWING || state_==TRACKING) ROS_INFO("robot%d: target assignment ongoing",id);
         targetAssignment();
+        //ROS_INFO("robot%d: target assignment finfished",id);
         
         // publish dis2evaders
         behavior_decision::dis2evaders dis2evaders_;
@@ -315,16 +317,19 @@ void PursuerBehaviorDecision::getState(int &state){
             path_pub.publish(path);
         }
     }
-    states_lock.unlock();
-    // ROS_DEBUG("robot%d 2",id);
 
-    int target_x = target_poses[target_id].first, target_y = target_poses[target_id].second;
-    if(state_ == TRACKING && grid_dis(start_x, start_y, target_x, target_y)/resolution < tracking2followingThre){
+    // int target_x = target_poses[target_id].first, target_y = target_poses[target_id].second;
+    // if(state_ == TRACKING && grid_dis(start_x, start_y, target_x, target_y)/resolution < tracking2followingThre){
+    if(target_id >= 0 && state_ != KEEPING && dis2evaders.find(target_id)==dis2evaders.end()) 
+        ROS_ERROR("cannot find target: %d in dis2targets", target_id);
+    if(state_ == TRACKING) 
+        ROS_INFO("robot%d: distance to target:%f",id,dis2evaders[target_id]*resolution);
+    if(state_ == TRACKING && dis2evaders[target_id]*resolution < tracking2followingThre){
         state_ = FOLLOWING;
         ROS_DEBUG_NAMED("state_transition","robot%d: state transform from TRACKING to FOLLOWING ",id);
     }
     state =  state_;
-    lock_map.unlock();
+
     ros::NodeHandle nh;
     nh.setParam(ns+"/target_id", target_id);
     // target_pub.publish((int8_t)target_id);
@@ -392,19 +397,19 @@ void PursuerBehaviorDecision::targetAssignment(){
 }
 // Sacrifice memory
 // using data map_, dis2evaders, path2evaders
-void PursuerBehaviorDecision::calculateDistance(int start_x, int start_y, int target_x, int target_y,int target_id){
+void PursuerBehaviorDecision::calculateDistance(int start_x, int start_y, int target_x, int target_y,int target_id_){
 
     // new target case, build path
-    if (path2evaders.find(target_id) == path2evaders.end()){
+    if (path2evaders.find(target_id_) == path2evaders.end()){
         std::vector<int> path;
         if(Astar(start_x, start_y, target_x, target_y, path)){// path is from [target -> start]
-            dis2evaders[target_id] = 0;
+            dis2evaders[target_id_] = 0;
             int pre_x = start_x, pre_y  = start_y;
             for (std::vector<int>::reverse_iterator rit = path.rbegin(); rit!= path.rend(); ++rit){
                 int curr_x = *rit % width, curr_y = *rit / width;
                 // store path from start to target 
-                path2evaders[target_id].push_back(*rit);
-                dis2evaders[target_id] += hypot(curr_x - pre_x, curr_y - pre_y);
+                path2evaders[target_id_].push_back(*rit);
+                dis2evaders[target_id_] += hypot(curr_x - pre_x, curr_y - pre_y);
                 pre_x = curr_x, pre_y  = curr_y;
             }
         }
@@ -413,8 +418,8 @@ void PursuerBehaviorDecision::calculateDistance(int start_x, int start_y, int ta
         }
     }
     else{
-        int head_x = path2evaders[target_id].front() % width, head_y = path2evaders[target_id].front() / width;
-        int tail_x = path2evaders[target_id].back() % width, tail_y = path2evaders[target_id].back() / width;
+        int head_x = path2evaders[target_id_].front() % width, head_y = path2evaders[target_id_].front() / width;
+        int tail_x = path2evaders[target_id_].back() % width, tail_y = path2evaders[target_id_].back() / width;
         // dynamic Astar
         // looking back : 5//一般路径都会大于5
         int count = 0;
@@ -422,27 +427,33 @@ void PursuerBehaviorDecision::calculateDistance(int start_x, int start_y, int ta
         if(std::hypot(start_x-head_x, start_y-head_y) > AdujustPathThre){
             
             int rand_ = std::max(std::rand() % 10, 1);
-            rand_ = rand_ < path2evaders[target_id].size()? rand_:path2evaders[target_id].size();
+            // Bug####################################################################3
+            if(path2evaders[target_id_].size() < 10) {
+                ROS_WARN("wayPoint is not enough");
+                dis2evaders[target_id_] = hypot(target_y-start_y, target_x-start_x);
+                return; 
+            }
+            rand_ = rand_ < path2evaders[target_id_].size()? rand_:path2evaders[target_id_].size();
 
-            std::deque<int>::iterator hit = path2evaders[target_id].begin();
+            std::deque<int>::iterator hit = path2evaders[target_id_].begin();
             while( grid_dis(start_x     , start_y     , *hit % width        , *hit / width)       + 
                    grid_dis(*hit % width, *hit / width, *(hit+rand_) % width, *(hit+rand_)/width) >
                    grid_dis(start_x     , start_y     , *(hit+rand_) % width, *(hit+rand_) / width)){
-                    dis2evaders[target_id] -= hypot(*hit % width - *(hit+1) % width, 
+                    dis2evaders[target_id_] -= hypot(*hit % width - *(hit+1) % width, 
                                                     *hit / width - *(hit+1) / width);
-                    path2evaders[target_id].pop_front();
+                    path2evaders[target_id_].pop_front();
                     ++hit;
                     ++count;
             }
             // if(count) ROS_DEBUG("head-pop:%d",count); count = 0;
             std::vector<int> hpath;
-            int head = path2evaders[target_id].front();
+            int head = path2evaders[target_id_].front();
             if(Astar(start_x, start_y, head % width, head / width, hpath)){
                 int pre_x = head % width, pre_y  = head / width;
                 for (std::vector<int>::iterator it = hpath.begin()+1; it!= hpath.end(); ++it){
                     int curr_x = *it % width, curr_y = *it / width;
-                    path2evaders[target_id].push_front(*it);
-                    dis2evaders[target_id] += hypot(curr_x - pre_x, curr_y - pre_y);
+                    path2evaders[target_id_].push_front(*it);
+                    dis2evaders[target_id_] += hypot(curr_x - pre_x, curr_y - pre_y);
                     pre_x = curr_x, pre_y  = curr_y;
                 }
             }
@@ -454,27 +465,27 @@ void PursuerBehaviorDecision::calculateDistance(int start_x, int start_y, int ta
         if(std::hypot(target_x-tail_x, target_y-tail_y) > AdujustPathThre){
 
             int rand_ = std::max(std::rand() % 10, 1);
-            rand_ = rand_ < path2evaders[target_id].size()? rand_:path2evaders[target_id].size();
+            rand_ = rand_ < path2evaders[target_id_].size()? rand_:path2evaders[target_id_].size();
 
-            std::deque<int>::iterator eit = path2evaders[target_id].end() - 1;
+            std::deque<int>::iterator eit = path2evaders[target_id_].end() - 1;
             while( grid_dis(target_x    , target_y    , *eit % width        , *eit/ width)        + 
                    grid_dis(*eit % width, *eit / width, *(eit-rand_) % width, *(eit-rand_)/width) >
                    grid_dis(target_x    , target_y    , *(eit-rand_) % width, *(eit-rand_) / width)){
-                    dis2evaders[target_id] -= hypot(*eit % width - *(eit -1) % width, 
+                    dis2evaders[target_id_] -= hypot(*eit % width - *(eit -1) % width, 
                                                     *eit / width - *(eit -1) / width);
-                    path2evaders[target_id].pop_back();
+                    path2evaders[target_id_].pop_back();
                     --eit;
                     count++;
             }
             // if(count) ROS_DEBUG("tail-pop:%d",count); 
             std::vector<int> epath;
-            int tail = path2evaders[target_id].back();
+            int tail = path2evaders[target_id_].back();
             if(Astar(target_x, target_y, tail % width, tail / width, epath)){
                 int pre_x = tail % width, pre_y  = tail / width;
                 for (std::vector<int>::iterator it = epath.begin()+1; it!= epath.end(); ++it){
                     int curr_x = *it % width, curr_y = *it / width;
-                    path2evaders[target_id].push_back(*it);
-                    dis2evaders[target_id] += hypot(curr_x - pre_x, curr_y - pre_y);
+                    path2evaders[target_id_].push_back(*it);
+                    dis2evaders[target_id_] += hypot(curr_x - pre_x, curr_y - pre_y);
                     pre_x = curr_x, pre_y  = curr_y;
                 }
             }
@@ -482,6 +493,12 @@ void PursuerBehaviorDecision::calculateDistance(int start_x, int start_y, int ta
                 ROS_ERROR("FIND PATH FAILED :3");
             }
         }
+    }
+    if(dis2evaders[target_id_]<0){
+        std::string ns = ros::this_node::getNamespace();
+        ROS_ERROR("%s,Dis:%f, Size: %zd",ns.c_str(),dis2evaders[target_id_], path2evaders[target_id_].size());
+        if(detected.find(target_id_)!=detected.end()) ROS_ERROR("%s,target:%d is still alive",ns.c_str(),target_id_);
+        else ROS_ERROR("%s,target:%d is dead",ns.c_str(), target_id_);
     }
 }
 

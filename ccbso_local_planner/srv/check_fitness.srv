@@ -8,5 +8,7 @@ float32 FangularAcc
 float32 FpotentialCollision
 float32 Fkeeping
 float32 FdisToTarget
+float32 FdisToSubgoal
+float32 Funiform
 float32 sum
 

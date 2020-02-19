@@ -43,7 +43,7 @@ void CCBSOPlanner::initialize(std::string name, tf::TransformListener* tf, costm
     sub_laser = nh.subscribe(ns+"/scan",1,&CCBSOPlanner::laserCallback,this);
     sub_path = nh.subscribe(ns+"/trackingPath",1 ,&CCBSOPlanner::pathCallback,this);
     for(int i=1;i<=pnum;i++){
-        ros::Subscriber sub_evaderState = nh.subscribe(ns+"/evader_state", 1, &CCBSOPlanner::evaderCallback,this);
+        ros::Subscriber sub_evaderState = nh.subscribe(gns+std::to_string(i)+"/evader_state", 1, &CCBSOPlanner::evaderCallback,this);
         sub_evaderStates.push_back(sub_evaderState);
         if(i!=id){
             ros::Subscriber sub_trail = nh.subscribe<nav_msgs::Path>(gns+std::to_string(i)+"/pheromoneTrail",1,boost::bind(&CCBSOPlanner::trailCallback, this, _1, i));
@@ -95,7 +95,7 @@ void CCBSOPlanner::pathCallback(const nav_msgs::PathConstPtr &msg){
 void CCBSOPlanner::evaderCallback(const behavior_decision::evaderStateConstPtr &msg){
     std::unique_lock<std::recursive_mutex> lock_evaders(mutex_evaders);
     evaderStates[msg->target_id] = *msg;
-    // ROS_WARN("Received evader");
+    // ROS_WARN("robot%d: Received evader,x:%f, y:%f",id, msg->x,msg->y);
 }
 
 bool CCBSOPlanner::checkFitnessService(check_fitness::Request &req,
@@ -118,19 +118,26 @@ bool CCBSOPlanner::checkFitnessService(check_fitness::Request &req,
             break;
         }
         case KEEPING:{
-            // try{res.Fobstacle =  Fobstacle(pos);}catch(...){ROS_WARN(">>>>>>>>>>>>Fobstacle");}
-            // try{res.FpotentialCollision = FpotentialCollision(pos);}catch(...){ROS_WARN(">>>>>>>>>>>>FpotentialCollision");}
-            // try{res.Fkeeping = Fkeeping(pos);}catch(...){ROS_WARN(">>>>>>>>>>>>Fkeeping");}
-            // try{res.FdisToTarget = FdisToTarget(pos);}catch(...){ROS_WARN(">>>>>>>>>>>>FdisToTarget");}
             res.Fobstacle =  Fobstacle(pos);
-            // res.FangularAcc = FangularAcc(pos);
             res.FpotentialCollision = FpotentialCollision(pos);
             res.Fkeeping = Fkeeping(pos);
             res.FdisToTarget = FdisToTarget(pos);
             res.sum = res.Fobstacle+res.FpotentialCollision+res.Fkeeping+res.FdisToTarget;
-        }
-        default:{
             break;
+        }
+        case TRACKING:{
+            res.Fobstacle = Fobstacle(pos);
+            res.FpotentialCollision = FpotentialCollision(pos);
+            res.FdisToSubgoal = FdisToSubgoal(pos);
+            res.sum = Fobstacle(pos) + FpotentialCollision(pos) + FdisToSubgoal(pos);
+            break;
+        }
+        case FOLLOWING:{
+            res.Fobstacle = Fobstacle(pos);
+            res.FpotentialCollision = FpotentialCollision(pos);
+            res.FdisToTarget = FdisToTarget(pos);
+            res.Funiform = Funiform(pos);
+            res.sum = Fobstacle(pos) + FpotentialCollision(pos) + FdisToTarget(pos) + Funiform(pos);
         }
     }
     publishLookAheadPoint(pos,true);
@@ -139,7 +146,7 @@ bool CCBSOPlanner::checkFitnessService(check_fitness::Request &req,
 bool CCBSOPlanner::setState(int &state){
     // TODO, bool alow_received
     if(state_ != state){
-        ROS_DEBUG("robot%d: state transform from %s to %s", id, states[state_].c_str(), states[state].c_str());
+        ROS_WARN("robot%d: state transform from %s to %s", id, states[state_].c_str(), states[state].c_str());
         state_ = state;
     }
 }
@@ -304,7 +311,8 @@ void CCBSOPlanner::bsoSelection(std::pair<float,float>& nextPos){
     std::vector<std::pair<float,float>> nextPoses;//delta_trans,delta_rot1
     std::multiset<std::pair<double,int>> individuals;//fitness,index, Ascending order
     // TODO, Add * delta_time?;
-    float searchDis = (state_ == KEEPING || state_ == FOLLOWING)? CCBSOCONFIG.max_vel_x : CCBSOCONFIG.searchDis;
+    // float searchDis = (state_ == KEEPING || state_ == FOLLOWING)? CCBSOCONFIG.max_vel_x : CCBSOCONFIG.searchDis;
+    float searchDis = (state_ == KEEPING)? CCBSOCONFIG.max_vel_x : CCBSOCONFIG.searchDis;
     
     // uniformly sampling, Add positive velocity
     for(int i=0;i<CCBSOCONFIG.psize;i++){
@@ -439,14 +447,23 @@ void CCBSOPlanner::bsoSelection(std::pair<float,float>& nextPos){
         ROS_DEBUG_NAMED("result","robot%i:distance:%f, angle:%f, value:%lf",id,nextPos.first,nextPos.second,(*individuals.begin()).first);
         switch(state_){
             case SEARCHING:{
-                //ROS_INFO("robot%i:Fpheromone:%f, Fobstacle:%f, Fcruise:%f, FangularAcc:%f",id,Fpheromone(nextPos),Fobstacle(nextPos),Fcruise(nextPos), FangularAcc(nextPos));
+                ROS_DEBUG_NAMED("value","robot%i:Fobstacle:%f, FpotentialCollision:%f, Fpheromone:%f, FangularAcc:%f",id,Fobstacle(nextPos),FpotentialCollision(nextPos), Fpheromone(nextPos), FangularAcc(nextPos));
                 break;
             }
             case KEEPING:{
-                ROS_DEBUG_NAMED("value","Fobstacle(pos):%f, FpotentialCollision(pos):%f, Fkeeping:%f, FdisToTarget:%f", Fobstacle(nextPos), FpotentialCollision(nextPos), Fkeeping(nextPos), FdisToTarget(nextPos));
-            }
-            default:{
+                ROS_DEBUG_NAMED("value","robot%i:Fobstacle:%f, FpotentialCollision:%f, Fkeeping:%f, FdisToTarget:%f", id, Fobstacle(nextPos), FpotentialCollision(nextPos), Fkeeping(nextPos), FdisToTarget(nextPos));
                 break;
+            }
+            case TRACKING:{
+                ROS_DEBUG_NAMED("TRACKING","robot%i-TRACKING:Fobstacle:%f, FpotentialCollision:%f, FdisToSubgoal:%f", id, Fobstacle(nextPos), FpotentialCollision(nextPos), FdisToSubgoal(nextPos));
+                break;
+            }
+            case FOLLOWING:{
+                geometry_msgs::Pose2D nextPos_;
+                nextPos_.x = pursuer_poses[id].x+nextPos.first*cos(pursuer_poses[id].theta+nextPos.second);
+                nextPos_.y = pursuer_poses[id].y+nextPos.first*sin(pursuer_poses[id].theta+nextPos.second);
+                float dis = hypot(evaderStates[targets[id]].y - nextPos_.y, evaderStates[targets[id]].x - nextPos_.x);
+                ROS_DEBUG_NAMED("FOLLOWING","robot%i-FOLLOWING:Fobstacle:%f, FpotentialCollision:%f, FdisToTarget:%f, Funiform:%f, dis:%f", id, Fobstacle(nextPos), FpotentialCollision(nextPos), FdisToTarget(nextPos), Funiform(nextPos), dis);
             }
         }
     }
@@ -458,6 +475,7 @@ void CCBSOPlanner::bsoSelection(std::pair<float,float>& nextPos){
 double CCBSOPlanner::calFitness(std::pair<float,float>& pos){
     geometry_msgs::Twist cmd_vel;
     double fitness = 0;
+    //TODO, consider target velocity
     switch(state_){
         case SEARCHING:{
             // fitness += Fpheromone(pos) + Fobstacle(pos) + FangularAcc(pos);
@@ -468,8 +486,12 @@ double CCBSOPlanner::calFitness(std::pair<float,float>& pos){
             fitness += Fobstacle(pos) + FpotentialCollision(pos) + Fkeeping(pos) + FdisToTarget(pos);
             break;
         }
-        default:{
-
+        case TRACKING:{
+            fitness += Fobstacle(pos) + FpotentialCollision(pos) + FdisToSubgoal(pos);
+            break;
+        }
+        case FOLLOWING:{
+            fitness += Fobstacle(pos) + FpotentialCollision(pos) + FdisToTarget(pos) + Funiform(pos);
         }
     }
     return fitness;
@@ -478,12 +500,15 @@ double CCBSOPlanner::calFitness(std::pair<float,float>& pos){
 float CCBSOPlanner::Fobstacle(std::pair<float,float>& pos){
     if(!received_scan) return 0.0;
     // if the obstacle is target, return 0.0
-    geometry_msgs::Pose2D nextPos;
-    nextPos.x = pursuer_poses[id].x+pos.first*cos(pursuer_poses[id].theta+pos.second);
-    nextPos.y = pursuer_poses[id].y+pos.first*sin(pursuer_poses[id].theta+pos.second);
-    if(!evaderStates[targets[id]].lost && hypot(evaderStates[targets[id]].y - nextPos.y, evaderStates[targets[id]].x - nextPos.x) - 0.1 < robot_radius){
-        return 0.0;
-    }
+    // geometry_msgs::Pose2D nextPos;
+    // nextPos.x = pursuer_poses[id].x+pos.first*cos(pursuer_poses[id].theta+pos.second);
+    // nextPos.y = pursuer_poses[id].y+pos.first*sin(pursuer_poses[id].theta+pos.second);
+    // float disToTarget = hypot(evaderStates[targets[id]].y - nextPos.y, evaderStates[targets[id]].x - nextPos.x);
+    // if(!evaderStates[targets[id]].lost && disToTarget - 0.1 < robot_radius){
+    //     float value = 0.0;
+    //     if(disToTarget < CCBSOCONFIG.searchDis) value+=2.0*exp()
+    //     return 0.0;
+    // }
 
     float posTheta = pos.first < 0? theta2pi(pos.second+PI) : theta2pi(pos.second);
   
@@ -691,6 +716,64 @@ float CCBSOPlanner::FdisToTarget(std::pair<float,float>& pos){
     float dis = hypot(evaderStates[targets[id]].y - nextPos.y, evaderStates[targets[id]].x - nextPos.x);
     float value = std::abs(dis-CCBSOCONFIG.disToTarget) * CCBSOCONFIG.weight_d;
     return value;
+}
+
+float CCBSOPlanner::FdisToSubgoal(std::pair<float,float>& pos){
+    bool foundSubgoal = false;
+    float subgoal_x, subgoal_y;
+    for(auto it = trackingPath.poses.begin();it!= trackingPath.poses.end();it++){
+        if(hypot(it->pose.position.y - pursuer_poses[id].y, it->pose.position.x - pursuer_poses[id].x) > CCBSOCONFIG.disToSubgoal){
+            subgoal_x = it->pose.position.x;
+            subgoal_y = it->pose.position.y;
+            foundSubgoal = true;
+            break;
+        }
+    }
+    if(!foundSubgoal){
+        ROS_ERROR("Didn't find a subgoal");
+        return 0.0;
+    }
+    geometry_msgs::Pose2D nextPos;
+    nextPos.x = pursuer_poses[id].x+pos.first*cos(pursuer_poses[id].theta+pos.second);
+    nextPos.y = pursuer_poses[id].y+pos.first*sin(pursuer_poses[id].theta+pos.second);
+    float dir = cos(pursuer_poses[id].theta) * (subgoal_y - pursuer_poses[id].y) - sin(pursuer_poses[id].theta) * (subgoal_x - pursuer_poses[id].x);
+    float dis = hypot(nextPos.y - subgoal_y, nextPos.x - subgoal_x);
+    // in case subgoal is at the back of pursuer
+    float value = dir*pos.second >= 0 ? dis : (1-dir*pos.second) * dis;
+    return CCBSOCONFIG.weight_g*value;
+}
+
+float CCBSOPlanner::Funiform(std::pair<float,float>& pos){
+    std::vector<int> cooperators;
+    int target_id_ = targets[id];
+    for(int i=1;i<=pnum;i++){
+        if(targets[i] == target_id_ && id != i){
+            cooperators.push_back(i);
+        }
+    }
+    if(cooperators.size()>2){
+        ROS_ERROR("robot:%i has too many cooperators",id);
+    }
+    if(cooperators.size()<1){
+        ROS_ERROR("target:%i don't have a keeper",target_id_);
+    }
+    
+    float value;
+    float uangle = 2*PI/(float)cooperators.size();
+    float thetai = atan2(pursuer_poses[id].y - evaderStates[target_id_].y, pursuer_poses[id].x - evaderStates[target_id_].x);
+    
+    if(cooperators.size() == 1){
+        for(auto it = cooperators.begin(); it != cooperators.end(); it++){
+            float thetax = atan2(pursuer_poses[*it].y - evaderStates[target_id_].y, pursuer_poses[*it].x - evaderStates[target_id_].x);
+            float angleDiff = std::abs(thetax-thetai);
+            // value += angleDiff > uangle? 2* std::abs(angleDiff - uangle): std::abs(angleDiff - uangle);
+            value += std::abs(angleDiff - uangle);
+        }
+    }
+    else{
+        value = 0;
+    }
+    return value*CCBSOCONFIG.weight_u;
 }
 
 void CCBSOPlanner::resetFrequency(double frequency){

@@ -109,6 +109,8 @@ namespace ccbso_local_planner{
     float FpotentialCollision(std::pair<float,float>& pos);
     float Fkeeping(std::pair<float,float>& pos);
     float FdisToTarget(std::pair<float,float>& pos);
+    float FdisToSubgoal(std::pair<float,float>& pos);
+    float Funiform(std::pair<float,float>& pos);
 
     inline void getNthElement(std::multiset<std::pair<double,int>>::iterator it, int n, std::pair<double,int>& individual){
       std::advance(it,n);
